@@ -6,6 +6,33 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.29]
+
+### English
+
+- The windows panel shows a picture of each window beside its title,
+  taken when the panel opens (minimized windows show the app's icon).
+- Closing a window from the panel takes it off the list, and the panel
+  closes with the app's last window instead of staying until the pointer
+  leaves.
+- The lyrics island shows only on the bare desktop: it tucks away while an
+  app is in front and comes back with the desktop.
+- The island shows the song's title and artist, small, beside a wave that
+  moves while the song plays.
+
+### Español
+
+- El panel de ventanas muestra una imagen de cada ventana junto a su
+  título, tomada al abrirse el panel (las ventanas minimizadas muestran el
+  icono de la app).
+- Cerrar una ventana desde el panel la quita de la lista, y el panel se
+  cierra con la última ventana de la app en lugar de quedarse hasta que el
+  puntero sale.
+- La isla de letras solo aparece en el escritorio: se recoge mientras hay
+  una app al frente y vuelve con el escritorio.
+- La isla muestra el título y el artista de la canción, en pequeño, junto a
+  una onda que se mueve mientras suena.
+
 ## [0.1.28]
 
 ### English
