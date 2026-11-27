@@ -143,6 +143,9 @@ pub struct SystemState {
     pub desktop_apps: Vec<Vec<DesktopApp>>,
     pub active: Option<ActiveWindow>,
     pub media: Option<Track>,
+    /// Pictures of windows for the windows panel: the image cache key and
+    /// the picture, per window handle.
+    pub previews: HashMap<isize, (u64, Arc<IconImage>)>,
     /// The playing song's synced lyrics, while the lyrics island is on.
     pub lyrics: Option<LyricsView>,
     pub usage: Usage,

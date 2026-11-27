@@ -100,6 +100,8 @@ const TIMER_OSD: usize = 4;
 const TIMER_WALLPAPER: usize = 5;
 /// When the next line of the lyrics starts.
 const TIMER_LYRICS: usize = 6;
+/// Moves the lyrics island's wave while a song plays.
+const TIMER_WAVE: usize = 7;
 /// Lines show this much early, so their slide ends as they are sung.
 const LYRICS_LEAD: Duration = Duration::from_millis(200);
 
@@ -119,6 +121,8 @@ enum Work {
     Avatar(IconImage),
     Logo(IconImage),
     Backdrop(IconImage),
+    /// Pictures of windows for the windows panel.
+    Previews(Vec<(isize, Option<IconImage>)>),
     Brightness(isize, f32),
 }
 
@@ -415,6 +419,10 @@ pub struct App {
     bluetooth: Option<bluetooth::Monitor>,
     media: Option<media::Watch>,
     lyrics: Option<crate::lyrics::Fetcher>,
+    /// Numbers the window pictures, for their image cache keys.
+    preview_counter: u64,
+    /// Whether the wave timer runs (an island shows a playing song).
+    wave_running: bool,
     /// Timing corrections the user made per song this session, in ms.
     lyrics_offsets: std::collections::HashMap<crate::lyrics::Song, i32>,
     desktops_watch: Option<RegistryWatch>,
@@ -518,6 +526,8 @@ impl App {
             media: media::Watch::start(control, WM_MEDIA),
             lyrics: crate::lyrics::Fetcher::start(control, WM_LYRICS),
             lyrics_offsets: std::collections::HashMap::new(),
+            preview_counter: 0,
+            wave_running: false,
             desktops_watch: RegistryWatch::new(
                 desktops::WATCH_KEY,
                 true,
@@ -943,7 +953,78 @@ impl App {
             }
         }
         self.state.desktop_apps = apps;
+        self.sync_window_panels();
         self.mark_all_dirty();
+    }
+
+    /// Keeps each open windows panel in step with the app's windows: a
+    /// closed window leaves its list, and the panel closes with the app's
+    /// last window. Pictures of windows that closed are dropped.
+    fn sync_window_panels(&mut self) {
+        let now = Instant::now();
+        let scale = self.config.appearance.anim_scale;
+        let apps = &self.state.desktop_apps;
+        let find = |app_id: &str| {
+            apps.iter()
+                .flatten()
+                .find(|app| app.app_id == app_id && !app.windows.is_empty())
+                .cloned()
+        };
+        for screen in &mut self.screens {
+            let Some((y, shown)) = screen.window_app.clone() else {
+                continue;
+            };
+            match find(&shown.app_id) {
+                Some(app) => {
+                    if app.windows != shown.windows {
+                        screen.window_app = Some((y, app));
+                        screen.dirty = true;
+                    }
+                }
+                None => {
+                    screen.windows.set(false, scale, now);
+                    screen.dirty = true;
+                }
+            }
+        }
+        let alive: std::collections::HashSet<isize> = self
+            .state
+            .desktop_apps
+            .iter()
+            .flatten()
+            .flat_map(|app| app.windows.iter().copied())
+            .collect();
+        self.state.previews.retain(|hwnd, (key, _)| {
+            let keep = alive.contains(hwnd);
+            if !keep {
+                paint::forget_image(*key);
+            }
+            keep
+        });
+    }
+
+    /// Takes pictures of `windows` for the windows panel, off the UI thread.
+    fn request_previews(&self, windows: Vec<isize>) {
+        let tx = self.work_tx.clone();
+        let control = self.control.0 as isize;
+        let _ = thread::Builder::new()
+            .name("previews".into())
+            .spawn(move || {
+                let pictures = windows
+                    .into_iter()
+                    .map(|hwnd| (hwnd, crate::previews::capture(hwnd)))
+                    .collect();
+                let _ = tx.send(Work::Previews(pictures));
+                // SAFETY: As in `start_workers`.
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                        Some(HWND(control as *mut _)),
+                        WM_WORKER,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
+                }
+            });
     }
 
     fn refresh_active(&mut self) {
@@ -1764,6 +1845,11 @@ impl App {
                 self.wallpaper_changed(false);
             }
             Event::Timer(TIMER_LYRICS) => self.sync_lyrics(),
+            Event::Timer(TIMER_WAVE) => {
+                for screen in &mut self.screens {
+                    screen.dirty |= screen.lyrics.wanted;
+                }
+            }
             Event::Timer(TIMER_OSD) => {
                 // SAFETY: One-shot: stop it.
                 unsafe {
@@ -1937,6 +2023,22 @@ impl App {
                     self.state.backdrop = Some((next, Arc::new(image)));
                     self.mark_all_dirty();
                 }
+                Work::Previews(pictures) => {
+                    for (hwnd, picture) in pictures {
+                        let Some(picture) = picture else { continue };
+                        self.preview_counter += 1;
+                        let key = crate::state::image_key(&format!(
+                            "preview:{hwnd}:{}",
+                            self.preview_counter
+                        ));
+                        if let Some((old, _)) =
+                            self.state.previews.insert(hwnd, (key, Arc::new(picture)))
+                        {
+                            paint::forget_image(old);
+                        }
+                    }
+                    self.mark_all_dirty();
+                }
                 Work::Brightness(monitor, value) => {
                     self.state.brightness.insert(monitor, value);
                 }
@@ -2037,6 +2139,7 @@ impl App {
         let config = &self.config;
         let scale = config.appearance.anim_scale;
         let rounding = config.border.rounding;
+        let mut wanted_previews: Option<Vec<isize>> = None;
         for screen in &mut self.screens {
             let t = Tokens::for_scale(config, screen.scale);
             let full_bar = bar::width(t.bar_inner, config.border.thickness, t.padding.small);
@@ -2118,12 +2221,20 @@ impl App {
                     if changed {
                         screen.window_app = Some((rect.center().1, app.clone()));
                         screen.dirty = true;
+                        wanted_previews = Some(app.windows.clone());
                     }
                 }
                 let want = tile.is_some() || over_panel;
                 if want != screen.windows.wanted {
                     screen.windows.set(want, scale, now);
                     screen.dirty = true;
+                    // Fresh pictures each time the panel opens.
+                    if want && wanted_previews.is_none() {
+                        wanted_previews = screen
+                            .window_app
+                            .as_ref()
+                            .map(|(_, app)| app.windows.clone());
+                    }
                 }
             }
             // A non-persistent bar slides out on hover.
@@ -2139,6 +2250,9 @@ impl App {
                     screen.dirty = true;
                 }
             }
+        }
+        if let Some(windows) = wanted_previews {
+            self.request_previews(windows);
         }
     }
 
@@ -2161,17 +2275,18 @@ impl App {
                 media.show_progress(progress);
             }
         }
-        // The island shows while there are lyrics, and gives way to the
-        // dashboard (which opens over the same spot).
+        // The island shows on the bare desktop only (no app in front, so it
+        // never sits over work), and gives way to the dashboard, which
+        // opens over the same spot.
         let anim_scale = self.config.appearance.anim_scale;
-        let has_lyrics = lyrics_on && self.state.lyrics.is_some();
+        let on_desktop = self.state.active.is_none();
         let line_moving = self
             .state
             .lyrics
             .as_ref()
             .is_some_and(|view| crate::modules::lyrics::moving(view, anim_scale, now));
         for screen in &mut self.screens {
-            let want = has_lyrics && !screen.dashboard.wanted && !screen.is_fullscreen;
+            let want = lyrics_on && on_desktop && !screen.dashboard.wanted && !screen.is_fullscreen;
             if want != screen.lyrics.wanted {
                 screen.lyrics.set(want, anim_scale, now);
                 screen.dirty = true;
@@ -2214,7 +2329,26 @@ impl App {
         // The progress arc moves smoothly while a dashboard shows it.
         animating |= dashboard_open && playing;
         // A line slides in for a moment; then nothing until the next one.
-        animating |= line_moving && self.screens.iter().any(|s| s.lyrics.wanted);
+        let island = self.screens.iter().any(|s| s.lyrics.wanted);
+        animating |= line_moving && island;
+        // The wave moves at its own low rate, only while a song plays.
+        let wave = island && self.state.media.as_ref().is_some_and(|t| t.playing);
+        if wave != self.wave_running {
+            self.wave_running = wave;
+            // SAFETY: Starts or stops a timer on our own window.
+            unsafe {
+                if wave {
+                    SetTimer(
+                        Some(self.control),
+                        TIMER_WAVE,
+                        crate::modules::lyrics::WAVE_FRAME.as_millis() as u32,
+                        None,
+                    );
+                } else {
+                    let _ = KillTimer(Some(self.control), TIMER_WAVE);
+                }
+            }
+        }
         if dashboard_open && playing {
             for screen in &mut self.screens {
                 screen.dirty |= screen.dashboard.wanted || screen.launcher.wanted;

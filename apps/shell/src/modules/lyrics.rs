@@ -28,10 +28,67 @@ const WORD: Duration = Duration::from_millis(180);
 /// How long a timing correction stays on the island after a scroll.
 const OFFSET_SHOWN: Duration = Duration::from_millis(1600);
 
+/// The song's title and artist, small, above the line.
+fn header_height(t: &crate::tokens::Tokens) -> f32 {
+    t.font.small * 1.5
+}
+
 pub fn size(ctx: &Ctx) -> (f32, f32) {
     let t = ctx.t;
-    let h = t.font.normal * 1.6 + t.padding.medium * 2.0;
+    let h = t.padding.medium * 2.0 + header_height(t) + t.font.normal * 1.6;
     (t.dash_media_width * 2.6, h)
+}
+
+/// The little wave beside the title: bars that rise and fall while the
+/// song plays and rest low while it is paused. `time` is in seconds.
+fn wave(ui: &mut Ui, x: f32, cy: f32, height: f32, playing: bool, time: f32) -> f32 {
+    const BARS: [(f32, f32); 5] = [(7.1, 0.0), (9.3, 1.3), (6.2, 2.1), (8.4, 0.7), (7.7, 2.8)];
+    let pal = *ui.pal;
+    let bar = (height * 0.16).max(2.0);
+    let gap = bar * 0.8;
+    for (i, (speed, phase)) in BARS.iter().enumerate() {
+        let level = if playing {
+            0.3 + 0.7 * (time * speed + phase).sin().abs()
+        } else {
+            0.25
+        };
+        let h = height * level;
+        let bx = x + i as f32 * (bar + gap);
+        ui.p.rect(Rect::new(bx, cy - h / 2.0, bar, h), bar / 2.0, pal.primary);
+    }
+    BARS.len() as f32 * (bar + gap) - gap
+}
+
+/// The title row: the wave, then "title · artist", centred together.
+fn header(ui: &mut Ui, row: Rect) {
+    let Some(track) = ui.state.media.clone() else {
+        return;
+    };
+    let t = *ui.t;
+    let pal = *ui.pal;
+    let label = if track.artist.is_empty() {
+        track.title.clone()
+    } else {
+        format!("{} · {}", track.title, track.artist)
+    };
+    let style = TextStyle::new(t.font.small).weight(500.0);
+    let wave_h = row.h * 0.62;
+    // Five bars and four gaps of 0.8 bar (see `wave`).
+    let wave_w = (wave_h * 0.16).max(2.0) * 8.2;
+    let gap = t.spacing.small;
+    let (text_w, _) = ui.p.measure(&label, style);
+    let text_w = text_w.min(row.w - wave_w - gap);
+    let x = row.x + (row.w - (wave_w + gap + text_w)) / 2.0;
+    let (_, cy) = row.center();
+    let started = ui.state.started.unwrap_or(ui.now);
+    let time = ui.now.saturating_duration_since(started).as_secs_f32();
+    let drawn = wave(ui, x, cy, wave_h, track.playing, time);
+    ui.p.text(
+        &label,
+        Rect::new(x + drawn + gap, row.y, text_w + 4.0, row.h),
+        style,
+        pal.on_surface_variant,
+    );
 }
 
 fn progress(since: Instant, length: Duration, anim_scale: f32, now: Instant) -> f32 {
@@ -41,6 +98,10 @@ fn progress(since: Instant, length: Duration, anim_scale: f32, now: Instant) -> 
     }
     (now.saturating_duration_since(since).as_secs_f32() / length).clamp(0.0, 1.0)
 }
+
+/// How often the wave moves while a song plays: smooth enough to read as
+/// motion, far below the screen's rate (the island is all that changes).
+pub const WAVE_FRAME: Duration = Duration::from_millis(66);
 
 /// Whether anything on the island is still moving (frames are needed).
 pub fn moving(view: &LyricsView, anim_scale: f32, now: Instant) -> bool {
@@ -52,22 +113,33 @@ pub fn moving(view: &LyricsView, anim_scale: f32, now: Instant) -> bool {
 }
 
 pub fn draw(ui: &mut Ui, rect: Rect) {
-    let Some(view) = ui.state.lyrics.clone() else {
-        return;
-    };
-    ui.scroll(rect, Action::LyricsOffset(0));
     let t = *ui.t;
     let pal = *ui.pal;
-    let scale = ui.config.appearance.anim_scale;
-    let now = ui.now;
-    let line_p = Curve::EmphasizedDecel.ease(progress(view.changed, LINE, scale, now));
-    let word_p = Curve::StandardDecel.ease(progress(view.word_changed, WORD, scale, now));
-    let inner = Rect::new(
+    let content = Rect::new(
         rect.x + t.padding.large,
         rect.y + t.padding.medium,
         rect.w - t.padding.large * 2.0,
         rect.h - t.padding.medium * 2.0,
     );
+    let header_h = header_height(&t);
+    header(ui, Rect::new(content.x, content.y, content.w, header_h));
+    let inner = Rect::new(
+        content.x,
+        content.y + header_h,
+        content.w,
+        content.h - header_h,
+    );
+    let Some(view) = ui.state.lyrics.clone() else {
+        // No synced lyrics for this song (or still looking): a note.
+        let (cx, cy) = inner.center();
+        ui.p.icon(icons::MUSIC_NOTE, cx, cy, t.icon.medium, 1.0, pal.primary);
+        return;
+    };
+    ui.scroll(rect, Action::LyricsOffset(0));
+    let scale = ui.config.appearance.anim_scale;
+    let now = ui.now;
+    let line_p = Curve::EmphasizedDecel.ease(progress(view.changed, LINE, scale, now));
+    let word_p = Curve::StandardDecel.ease(progress(view.word_changed, WORD, scale, now));
     let rise = inner.h * 0.8;
     let before = ui.p.opacity;
     // `sung` is how many words are filled, and how many were before the

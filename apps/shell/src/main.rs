@@ -29,6 +29,7 @@ mod icons;
 mod lyrics;
 mod media;
 mod modules;
+mod previews;
 mod render;
 mod screen;
 mod state;

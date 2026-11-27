@@ -147,6 +147,14 @@ thread_local! {
     static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
 }
 
+/// Drops a cached image (one that will not be drawn again, or is replaced
+/// under the same key).
+pub fn forget_image(key: u64) {
+    with_cache(|cache| {
+        cache.images.remove(&key);
+    });
+}
+
 /// Runs `f` with the UI thread's paint cache.
 pub fn with_cache<R>(f: impl FnOnce(&mut Cache) -> R) -> R {
     CACHE.with(|cache| f(&mut cache.borrow_mut()))
