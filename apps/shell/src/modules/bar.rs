@@ -141,12 +141,12 @@ pub fn draw(ui: &mut Ui, bar: Rect, state: &mut BarState, monitor: isize) {
     // Heights of fixed entries. The active window takes what its name
     // needs (up to what is left); spacers share the rest. Entries with
     // nothing to show take no room at all.
-    let active_natural = ui.state.active.as_ref().map_or(0.0, |active| {
+    let active_natural = {
         let style = TextStyle::new(t.font.normal).weight(600.0);
-        let (w, _) = ui.p.measure(&app_label(ui, active), style);
+        let (w, _) = ui.p.measure(&active_label(ui), style);
         // A little slack: text laid out at exactly its width gets ellipsised.
         w + 6.0
-    });
+    };
     let has_active = entries.iter().any(|e| matches!(e, Entry::ActiveWindow));
     let spacing = t.spacing.medium;
     let v_padding = t.padding.large;
@@ -434,15 +434,24 @@ fn app_label(ui: &Ui, active: &crate::state::ActiveWindow) -> String {
     })
 }
 
+/// What the active-window entry reads: the active app's name, or the
+/// project's name on the bare desktop, so the bar is never left empty there.
+fn active_label(ui: &Ui) -> String {
+    ui.state
+        .active
+        .as_ref()
+        .map_or_else(|| DESKTOP_LABEL.to_string(), |active| app_label(ui, active))
+}
+
+const DESKTOP_LABEL: &str = "Norbanner";
+
 fn active_window(ui: &mut Ui, rect: Rect) {
-    let Some(active) = ui.state.active.clone() else {
-        return;
-    };
+    let active = ui.state.active.clone();
     let t = *ui.t;
     let (a, b) = accents(ui);
     // Just the app's name, reading top to bottom a quarter turn, in the
     // accent gradient.
-    let label = app_label(ui, &active);
+    let label = active_label(ui);
     let style = TextStyle::new(t.font.normal).weight(600.0);
     let (text_w, _) = ui.p.measure(&label, style);
     let shown = (text_w + 6.0).min(rect.h);
@@ -450,10 +459,12 @@ fn active_window(ui: &mut Ui, rect: Rect) {
         return;
     }
     let (cx, _) = rect.center();
-    ui.click(
-        Rect::new(rect.x, rect.y, rect.w, shown),
-        Action::FocusWindow(active.hwnd),
-    );
+    if let Some(active) = active {
+        ui.click(
+            Rect::new(rect.x, rect.y, rect.w, shown),
+            Action::FocusWindow(active.hwnd),
+        );
+    }
     let line = t.font.normal * 1.5;
     let cy = rect.y + shown / 2.0;
     let text_rect = Rect::new(cx - shown / 2.0, cy - line / 2.0, shown, line);
