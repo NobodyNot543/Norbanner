@@ -6,6 +6,29 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.27]
+
+### English
+
+- Lyrics island: a small island at the top shows the line of the playing
+  song as it is sung, with a short slide between lines. Turn it on or off
+  with the note button in the dashboard's media card; bringing the pointer
+  to the top still opens the full dashboard over it. Off by default: when
+  on, the song's title, artist and length are sent to lrclib.net to find
+  its synced lyrics. Songs without synced lyrics show no island.
+- `norbanner shell lyrics toggle` switches it from scripts.
+
+### Español
+
+- Isla de letras: una isla pequeña arriba muestra el verso de la canción que
+  suena a medida que se canta, con un deslizamiento corto entre versos. Se
+  activa o desactiva con el botón de la nota en la tarjeta de música del
+  panel; al llevar el puntero arriba se sigue abriendo el panel completo
+  encima. Apagada por defecto: al activarla, el título, el artista y la
+  duración de la canción se envían a lrclib.net para buscar su letra
+  sincronizada. Las canciones sin letra sincronizada no muestran la isla.
+- `norbanner shell lyrics toggle` la activa o desactiva desde scripts.
+
 ## [0.1.26]
 
 ### English
