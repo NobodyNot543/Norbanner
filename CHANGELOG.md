@@ -6,6 +6,18 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.25]
+
+### English
+
+- On the bare desktop, with no app in front, the bar shows "Norbanner"
+  instead of an empty space.
+
+### Español
+
+- En el escritorio, sin ninguna app al frente, la barra muestra "Norbanner"
+  en lugar de un espacio vacío.
+
 ## [0.1.24]
 
 ### English
