@@ -143,6 +143,8 @@ pub struct SystemState {
     pub desktop_apps: Vec<Vec<DesktopApp>>,
     pub active: Option<ActiveWindow>,
     pub media: Option<Track>,
+    /// The playing song's synced lyrics, while the lyrics island is on.
+    pub lyrics: Option<LyricsView>,
     pub usage: Usage,
     pub user_name: String,
     pub avatar: Option<Arc<IconImage>>,
@@ -155,6 +157,16 @@ pub struct SystemState {
     /// Brightness per HMONITOR, 0–1, for screens that support DDC/CI.
     pub brightness: HashMap<isize, f32>,
     pub started: Option<Instant>,
+}
+
+/// The lyrics island's content: the song's lines, the one being sung and
+/// the one before it, and when they last changed (for the slide between).
+#[derive(Clone)]
+pub struct LyricsView {
+    pub lines: Arc<Vec<norbanner_core::lyrics::Line>>,
+    pub current: Option<usize>,
+    pub previous: Option<usize>,
+    pub changed: Instant,
 }
 
 /// What the icon worker sends back: the app id and, if found, its icon

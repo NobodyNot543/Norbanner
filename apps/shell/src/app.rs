@@ -72,7 +72,7 @@ use crate::{
     modules::{bar, launcher::LauncherState, session::SessionState},
     render::{Gpu, paint},
     screen::{self, Drag, Screen},
-    state::{ActiveWindow, Clock, DesktopApp, SystemState},
+    state::{ActiveWindow, Clock, DesktopApp, LyricsView, SystemState},
     strings,
     tokens::Tokens,
     ui::{HitKind, Slider},
@@ -89,6 +89,8 @@ pub const WM_LOCK_KEYS: u32 = WM_APP + 17;
 pub const WM_CONFIG: u32 = WM_APP + 18;
 /// The wallpaper's registry key changed.
 pub const WM_WALLPAPER: u32 = WM_APP + 19;
+/// A lyrics lookup ended.
+pub const WM_LYRICS: u32 = WM_APP + 20;
 
 const TIMER_POLL: usize = 1;
 const TIMER_SECOND: usize = 2;
@@ -96,6 +98,10 @@ const TIMER_WINDOWS: usize = 3;
 const TIMER_OSD: usize = 4;
 /// A moment after the wallpaper's key changes, so the new file is in place.
 const TIMER_WALLPAPER: usize = 5;
+/// When the next line of the lyrics starts.
+const TIMER_LYRICS: usize = 6;
+/// Lines show this much early, so their slide ends as they are sung.
+const LYRICS_LEAD: Duration = Duration::from_millis(200);
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 static CONFIG_CHANGED: AtomicU32 = AtomicU32::new(0);
@@ -226,6 +232,7 @@ pub fn is_known_command(command: &str) -> bool {
             | ["wallpaper", "set", ..]
             | ["scheme", "variant" | "mode", _]
             | ["mpris", "playPause" | "next" | "previous"]
+            | ["lyrics", "toggle"]
             | ["workspace", _]
             | ["osd", "show"]
     )
@@ -407,6 +414,7 @@ pub struct App {
     _network: Option<NetworkWatch>,
     bluetooth: Option<bluetooth::Monitor>,
     media: Option<media::Watch>,
+    lyrics: Option<crate::lyrics::Fetcher>,
     desktops_watch: Option<RegistryWatch>,
     /// `Control Panel\Desktop`, where Windows records the wallpaper however
     /// it is changed (Settings, slideshow, Spotlight, another app).
@@ -506,6 +514,7 @@ impl App {
             _network: NetworkWatch::new(control.0 as isize, WM_NETWORK),
             bluetooth: bluetooth::Monitor::new(control.0 as isize, WM_BLUETOOTH).ok(),
             media: media::Watch::start(control, WM_MEDIA),
+            lyrics: crate::lyrics::Fetcher::start(control, WM_LYRICS),
             desktops_watch: RegistryWatch::new(
                 desktops::WATCH_KEY,
                 true,
@@ -1024,17 +1033,98 @@ impl App {
         edit(&mut config);
         match norbanner_config::update(&self.config_path, |mut saved| {
             saved.theme = config.theme.clone();
+            saved.dashboard.lyrics = config.dashboard.lyrics;
             saved
         }) {
-            Ok(saved) => self.config.theme = saved.theme,
+            Ok(saved) => {
+                self.config.theme = saved.theme;
+                self.config.dashboard.lyrics = saved.dashboard.lyrics;
+            }
             Err(error) => {
                 norbanner_shell::log::line(&format!("could not save the configuration: {error}"));
                 self.config.theme = config.theme;
+                self.config.dashboard.lyrics = config.dashboard.lyrics;
             }
         }
         self.config_stamp = std::fs::metadata(&self.config_path)
             .and_then(|m| m.modified())
             .ok();
+    }
+
+    /// Brings the lyrics island up to date with the playing song: looks the
+    /// song up if needed, picks the line being sung, and sets a one-shot
+    /// timer for the next one. Nothing runs between lines.
+    fn sync_lyrics(&mut self) {
+        let now = Instant::now();
+        let track = self
+            .state
+            .media
+            .as_ref()
+            .filter(|_| self.config.dashboard.lyrics);
+        let lines = match (&mut self.lyrics, track) {
+            (Some(fetcher), Some(track)) => {
+                let song = crate::lyrics::Song {
+                    title: track.title.clone(),
+                    artist: track.artist.clone(),
+                };
+                fetcher
+                    .get(&song, track.timeline.map(|timeline| timeline.duration))
+                    .flatten()
+            }
+            _ => None,
+        };
+        let timeline = track.and_then(|track| track.timeline);
+        let Some(lines) = lines else {
+            // SAFETY: Stops our own timer; harmless if it is not running.
+            unsafe {
+                let _ = KillTimer(Some(self.control), TIMER_LYRICS);
+            }
+            if self.state.lyrics.take().is_some() {
+                self.mark_all_dirty();
+            }
+            return;
+        };
+        let position = timeline.map(|timeline| timeline.position_at(now) + LYRICS_LEAD);
+        let current =
+            position.and_then(|position| norbanner_core::lyrics::index_at(&lines, position));
+        match &mut self.state.lyrics {
+            Some(view) if Arc::ptr_eq(&view.lines, &lines) => {
+                if view.current != current {
+                    view.previous = view.current;
+                    view.current = current;
+                    view.changed = now;
+                    self.mark_all_dirty();
+                }
+            }
+            _ => {
+                self.state.lyrics = Some(LyricsView {
+                    lines: lines.clone(),
+                    current,
+                    previous: None,
+                    changed: now,
+                });
+                self.mark_all_dirty();
+            }
+        }
+        let next = timeline
+            .filter(|timeline| timeline.advancing(now))
+            .zip(position)
+            .and_then(|(_, position)| {
+                norbanner_core::lyrics::next_change(&lines, position)
+                    .map(|next| next.saturating_sub(position))
+            });
+        // SAFETY: (Re)arms or stops a timer on our own window.
+        unsafe {
+            match next {
+                Some(wait) => {
+                    let ms = wait.as_millis().clamp(16, 60_000) as u32;
+                    SetTimer(Some(self.control), TIMER_LYRICS, ms, None);
+                }
+                None => {
+                    let _ = KillTimer(Some(self.control), TIMER_LYRICS);
+                }
+            }
+        }
     }
 
     /// The screen under the pointer, else the first.
@@ -1291,6 +1381,11 @@ impl App {
                     watch.send(track, control);
                 }
             }
+            Action::ToggleLyrics => {
+                self.save_config(|c| c.dashboard.lyrics = !c.dashboard.lyrics);
+                self.sync_lyrics();
+                self.mark_all_dirty();
+            }
             Action::ToggleMute => {
                 if let Some(audio) = &mut self.audio {
                     let _ = audio.toggle_mute();
@@ -1462,6 +1557,7 @@ impl App {
             ["mpris", "playPause"] => self.perform(Action::Media(Control::PlayPause)),
             ["mpris", "next"] => self.perform(Action::Media(Control::Next)),
             ["mpris", "previous"] => self.perform(Action::Media(Control::Previous)),
+            ["lyrics", "toggle"] => self.perform(Action::ToggleLyrics),
             ["workspace", n] => {
                 if let Ok(n) = n.parse::<usize>() {
                     desktops::go_to(n.saturating_sub(1));
@@ -1619,6 +1715,7 @@ impl App {
                 }
                 self.wallpaper_changed(false);
             }
+            Event::Timer(TIMER_LYRICS) => self.sync_lyrics(),
             Event::Timer(TIMER_OSD) => {
                 // SAFETY: One-shot: stop it.
                 unsafe {
@@ -1729,7 +1826,16 @@ impl App {
             WM_BLUETOOTH => {
                 self.state.bluetooth = self.bluetooth.as_ref().map(bluetooth::Monitor::is_on)
             }
-            WM_MEDIA => self.state.media = self.media.as_ref().and_then(media::Watch::snapshot),
+            WM_MEDIA => {
+                self.state.media = self.media.as_ref().and_then(media::Watch::snapshot);
+                self.sync_lyrics();
+            }
+            WM_LYRICS => {
+                if let Some(fetcher) = &mut self.lyrics {
+                    fetcher.collect();
+                }
+                self.sync_lyrics();
+            }
             WM_DESKTOPS => {
                 if let Some(watch) = &mut self.desktops_watch {
                     watch.arm();
@@ -1746,7 +1852,10 @@ impl App {
                 }
             }
             WM_LOCK_KEYS => self.refresh_lock_keys(),
-            WM_CONFIG => self.reload_config(),
+            WM_CONFIG => {
+                self.reload_config();
+                self.sync_lyrics();
+            }
             crate::state::WM_ICONS => {
                 if self.state.icons.receive() {
                     self.mark_all_dirty();
@@ -1995,10 +2104,30 @@ impl App {
             .screens
             .iter()
             .any(|s| s.dashboard.wanted || s.launcher.wanted);
-        if dashboard_open != self.media_progress {
-            self.media_progress = dashboard_open;
+        // The lyrics follow the song's position too.
+        let lyrics_on = self.config.dashboard.lyrics && self.state.media.is_some();
+        let progress = dashboard_open || lyrics_on;
+        if progress != self.media_progress {
+            self.media_progress = progress;
             if let Some(media) = &self.media {
-                media.show_progress(dashboard_open);
+                media.show_progress(progress);
+            }
+        }
+        // The island shows while there are lyrics, and gives way to the
+        // dashboard (which opens over the same spot).
+        let anim_scale = self.config.appearance.anim_scale;
+        let has_lyrics = lyrics_on && self.state.lyrics.is_some();
+        let line_moving = self.state.lyrics.as_ref().is_some_and(|view| {
+            crate::modules::lyrics::change_progress(view, anim_scale, now) < 1.0
+        });
+        for screen in &mut self.screens {
+            let want = has_lyrics && !screen.dashboard.wanted && !screen.is_fullscreen;
+            if want != screen.lyrics.wanted {
+                screen.lyrics.set(want, anim_scale, now);
+                screen.dirty = true;
+            }
+            if line_moving && screen.lyrics.wanted {
+                screen.dirty = true;
             }
         }
         let mut animating = false;
@@ -2034,6 +2163,8 @@ impl App {
         }
         // The progress arc moves smoothly while a dashboard shows it.
         animating |= dashboard_open && playing;
+        // A line slides in for a moment; then nothing until the next one.
+        animating |= line_moving && self.screens.iter().any(|s| s.lyrics.wanted);
         if dashboard_open && playing {
             for screen in &mut self.screens {
                 screen.dirty |= screen.dashboard.wanted || screen.launcher.wanted;

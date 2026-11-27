@@ -26,6 +26,7 @@ mod exclusive;
 mod guard;
 mod hotkeys;
 mod icons;
+mod lyrics;
 mod media;
 mod modules;
 mod render;

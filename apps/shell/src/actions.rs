@@ -40,6 +40,8 @@ pub enum Action {
     },
     StepDesktop(i32),
     Media(Control),
+    /// Shows or hides the lyrics island.
+    ToggleLyrics,
     ToggleMute,
     VolumeStep(i32),
     BrightnessStep(isize, i32),

@@ -93,9 +93,15 @@ pnpm tauri dev
 
 ## Privacidad
 
-Norbanner no recoge datos ni tiene telemetría. Su única petición de red es
-opcional: Configuración consulta GitHub Releases por una versión nueva al
-abrirse (se desactiva en Configuración → General → *Buscar actualizaciones*).
+Norbanner no recoge datos ni tiene telemetría. Hace dos peticiones de red,
+ambas opcionales:
+
+- Configuración consulta GitHub Releases por una versión nueva al abrirse (se
+  desactiva en Configuración → General → *Buscar actualizaciones*).
+- Con la isla de letras activada (apagada por defecto; botón de la nota en la
+  tarjeta de música del panel), el título, el artista y la duración de la
+  canción que suena se envían a [lrclib.net](https://lrclib.net) para buscar
+  su letra sincronizada.
 
 ## Créditos
 

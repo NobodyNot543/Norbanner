@@ -49,6 +49,7 @@ use crate::{
         bar::{self, BarState},
         dashboard::{self, DashState},
         launcher::{self, LauncherState},
+        lyrics,
         osd::{self, OsdState},
         place,
         session::{self, SessionState},
@@ -203,6 +204,8 @@ pub struct Screen {
     pub launcher: Drawer,
     pub session: Drawer,
     pub osd: Drawer,
+    /// The small lyrics island at the top.
+    pub lyrics: Drawer,
     /// The panel listing an app's windows, beside its tile.
     pub windows: Drawer,
     /// Which app that panel lists, and the height it opens at.
@@ -244,6 +247,7 @@ pub struct Placements {
     pub launcher: Placement,
     pub session: Placement,
     pub osd: Placement,
+    pub lyrics: Placement,
     pub windows: Placement,
     /// Where each drawer would be fully open (for hover triggers).
     pub dashboard_open: Rect,
@@ -300,6 +304,7 @@ impl Screen {
             launcher: Drawer::default(),
             session: Drawer::default(),
             osd: Drawer::default(),
+            lyrics: Drawer::default(),
             windows: Drawer::default(),
             window_app: None,
             dashboard_pinned: false,
@@ -380,6 +385,7 @@ impl Screen {
             self.launcher.set(false, anim_scale, now);
             self.session.set(false, anim_scale, now);
             self.osd.set(false, anim_scale, now);
+            self.lyrics.set(false, anim_scale, now);
             self.windows.set(false, anim_scale, now);
         } else if self.hidden {
             // SAFETY: Shows our own window again without focusing it.
@@ -396,6 +402,7 @@ impl Screen {
             || self.launcher.animating(now)
             || self.session.animating(now)
             || self.osd.animating(now)
+            || self.lyrics.animating(now)
             || self.windows.animating(now)
             || self.bar_width.animating(now)
             || self.fullscreen.animating(now)
@@ -485,6 +492,7 @@ impl Screen {
         let (lw, lh) = launcher::size(ctx, launcher_state);
         let (sw, sh) = session::size(ctx);
         let (ow, oh) = osd::size(ctx, self.monitor);
+        let (yw, yh) = lyrics::size(ctx);
         let center_x = inner.x + inner.w / 2.0;
         let center_y = inner.y + inner.h / 2.0;
         let session_p = self.session.progress(now);
@@ -518,6 +526,16 @@ impl Screen {
                 k,
             ),
             session: session_place,
+            lyrics: place(
+                inner,
+                Edge::Top,
+                center_x,
+                yw.min(inner.w * 0.6),
+                yh,
+                self.lyrics.progress(now),
+                yh / 2.0,
+                k,
+            ),
             windows: {
                 let app = self.window_app.as_ref().map(|(_, app)| app);
                 let (ww, wh) = window_list::size(ctx, app);
@@ -555,6 +573,7 @@ impl Screen {
             self.placements.launcher,
             self.placements.session,
             self.placements.osd,
+            self.placements.lyrics,
             self.placements.windows,
         ]
         .iter()
@@ -686,6 +705,7 @@ impl Screen {
                 ui.p.opacity = before;
                 ui.p.unclip();
             }
+            drawer(&mut ui, &placements.lyrics, lyrics::draw);
             drawer(&mut ui, &placements.dashboard, |ui, r| {
                 dashboard::draw(ui, r, dash_state)
             });

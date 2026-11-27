@@ -256,6 +256,9 @@ section!(
         drag_threshold: f32 = 50.0,
         /// Refresh interval of the resource meters, in milliseconds.
         resource_update_interval: u32 = 1000,
+        /// A small island at the top shows the playing song's synced lyrics.
+        /// Off by default: it looks the song up on lrclib.net.
+        lyrics: bool = false,
     }
 );
 

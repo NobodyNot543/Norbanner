@@ -111,9 +111,14 @@ cd apps\settings; pnpm test; pnpm build
 
 ## Privacy
 
-Norbanner collects no data and has no telemetry. Its only network request is
-optional: Settings asks GitHub Releases for a newer version when it opens
-(turn it off in Settings → General → *Check for updates*).
+Norbanner collects no data and has no telemetry. It makes two network
+requests, both optional:
+
+- Settings asks GitHub Releases for a newer version when it opens (turn it
+  off in Settings → General → *Check for updates*).
+- With the lyrics island on (off by default; the note button in the
+  dashboard's media card), the playing song's title, artist and length are
+  sent to [lrclib.net](https://lrclib.net) to find its synced lyrics.
 
 ## Credits
 

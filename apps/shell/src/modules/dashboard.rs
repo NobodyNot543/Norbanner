@@ -414,6 +414,27 @@ fn media_card(ui: &mut Ui, rect: Rect) {
             );
         }
     }
+    // Lyrics island switch, in the corner: filled while it is on.
+    let lyrics_on = ui.config.dashboard.lyrics;
+    let switch = t.icon.medium + t.padding.small * 2.0;
+    ui.icon_button(
+        Rect::new(
+            rect.right() - switch - t.padding.medium,
+            rect.y + t.padding.medium,
+            switch,
+            switch,
+        ),
+        icons::MUSIC_NOTE,
+        t.icon.medium,
+        if lyrics_on { 1.0 } else { 0.0 },
+        lyrics_on.then_some(pal.secondary_container),
+        if lyrics_on {
+            pal.on_secondary_container
+        } else {
+            pal.on_surface_variant
+        },
+        Action::ToggleLyrics,
+    );
     let cover_rect = Rect::new(cx - cover / 2.0, cy - cover / 2.0, cover, cover);
     match track.as_ref().and_then(|track| track.artwork.clone()) {
         Some(art) => {

@@ -1,0 +1,270 @@
+//! Synced lyrics for the playing song, looked up on lrclib.net on a worker
+//! thread. Only the title, the artist and the length are sent, and only
+//! while the user has the lyrics island on. Results (found or not) are kept
+//! for the session, so a song is looked up once.
+
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, SyncSender},
+    },
+    thread,
+    time::Duration,
+};
+
+use norbanner_core::lyrics::{self, Line};
+use windows::{
+    Win32::{
+        Foundation::{HWND, LPARAM, WPARAM},
+        Networking::WinHttp::{
+            INTERNET_DEFAULT_HTTPS_PORT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_FLAG_SECURE,
+            WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE, WinHttpCloseHandle,
+            WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryDataAvailable,
+            WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
+            WinHttpSetTimeouts,
+        },
+        UI::WindowsAndMessaging::PostMessageW,
+    },
+    core::{HSTRING, PCWSTR, w},
+};
+
+const HOST: PCWSTR = w!("lrclib.net");
+/// lrclib asks clients to name themselves.
+const AGENT: PCWSTR = w!("Norbanner (https://github.com/NobodyNot543/Norbanner)");
+/// Lyric files are small; anything bigger is not one.
+const MAX_BYTES: usize = 512 * 1024;
+
+/// Which song a lookup is for.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Song {
+    pub title: String,
+    pub artist: String,
+}
+
+/// The lyrics of a song: `None` when it has no synced lyrics.
+pub type Found = (Song, Option<Arc<Vec<Line>>>);
+
+pub struct Fetcher {
+    requests: SyncSender<(Song, Option<Duration>)>,
+    results: Arc<Mutex<Option<Found>>>,
+    cache: HashMap<Song, Option<Arc<Vec<Line>>>>,
+    pending: Option<Song>,
+}
+
+impl Fetcher {
+    /// Starts the worker; it posts `message` to `hwnd` when a lookup ends.
+    pub fn start(hwnd: HWND, message: u32) -> Option<Self> {
+        let (requests, inbox) = mpsc::sync_channel(1);
+        let results = Arc::new(Mutex::new(None));
+        let window = hwnd.0 as isize;
+        {
+            let results = results.clone();
+            thread::Builder::new()
+                .name("norbanner-lyrics".into())
+                .spawn(move || run(&inbox, &results, window, message))
+                .ok()?;
+        }
+        Some(Self {
+            requests,
+            results,
+            cache: HashMap::new(),
+            pending: None,
+        })
+    }
+
+    /// The lyrics for `song` if they are known; otherwise starts a lookup
+    /// (one at a time; a newer song replaces a queued one) and returns
+    /// `None` until it ends.
+    pub fn get(&mut self, song: &Song, length: Option<Duration>) -> Option<Option<Arc<Vec<Line>>>> {
+        if let Some(known) = self.cache.get(song) {
+            return Some(known.clone());
+        }
+        if self.pending.as_ref() != Some(song)
+            && self.requests.try_send((song.clone(), length)).is_ok()
+        {
+            self.pending = Some(song.clone());
+        }
+        None
+    }
+
+    /// Takes a finished lookup into the cache.
+    pub fn collect(&mut self) {
+        let Some((song, lines)) = self.results.lock().ok().and_then(|mut r| r.take()) else {
+            return;
+        };
+        if self.pending.as_ref() == Some(&song) {
+            self.pending = None;
+        }
+        self.cache.insert(song, lines);
+    }
+}
+
+fn run(
+    inbox: &Receiver<(Song, Option<Duration>)>,
+    results: &Mutex<Option<Found>>,
+    window: isize,
+    message: u32,
+) {
+    while let Ok((song, length)) = inbox.recv() {
+        let lines = lookup(&song, length).map(Arc::new);
+        if let Ok(mut slot) = results.lock() {
+            *slot = Some((song, lines));
+        }
+        // SAFETY: Posts a notification by value to the shell's own window.
+        unsafe {
+            let _ = PostMessageW(Some(HWND(window as *mut _)), message, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+/// Searches by title and artist and takes the synced lyrics of the result
+/// whose length is closest to the song's.
+fn lookup(song: &Song, length: Option<Duration>) -> Option<Vec<Line>> {
+    if song.title.trim().is_empty() {
+        return None;
+    }
+    let mut path = format!("/api/search?track_name={}", encode(song.title.trim()));
+    if !song.artist.trim().is_empty() {
+        path.push_str(&format!("&artist_name={}", encode(song.artist.trim())));
+    }
+    let body = get(&path)?;
+    let results: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
+    let wanted = length.map(|l| l.as_secs_f64());
+    results
+        .iter()
+        .filter_map(|r| {
+            let synced = r.get("syncedLyrics")?.as_str()?;
+            let lines = lyrics::parse(synced);
+            if lines.is_empty() {
+                return None;
+            }
+            let off = match (
+                wanted,
+                r.get("duration").and_then(serde_json::Value::as_f64),
+            ) {
+                (Some(wanted), Some(duration)) => (wanted - duration).abs(),
+                _ => 0.0,
+            };
+            Some((off, lines))
+        })
+        // A version more than a few seconds longer or shorter is another
+        // recording; its timings would not match.
+        .filter(|(off, _)| *off <= 5.0)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, lines)| lines)
+}
+
+/// Percent-encodes a query value.
+fn encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 3);
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Closes a WinHTTP handle when dropped.
+struct Handle(*mut core::ffi::c_void);
+
+impl Handle {
+    fn new(raw: *mut core::ffi::c_void) -> Option<Self> {
+        (!raw.is_null()).then_some(Self(raw))
+    }
+}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        // SAFETY: The handle came from WinHTTP and is closed once.
+        unsafe {
+            let _ = WinHttpCloseHandle(self.0);
+        }
+    }
+}
+
+/// An HTTPS GET of `path` on lrclib; the body of a 200 response.
+fn get(path: &str) -> Option<Vec<u8>> {
+    // SAFETY: Plain WinHTTP calls on handles owned by this function; each
+    // buffer outlives the call that fills it.
+    unsafe {
+        let session = Handle::new(WinHttpOpen(
+            AGENT,
+            WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+            PCWSTR::null(),
+            PCWSTR::null(),
+            0,
+        ))?;
+        WinHttpSetTimeouts(session.0, 5000, 5000, 5000, 8000).ok()?;
+        let connection = Handle::new(WinHttpConnect(
+            session.0,
+            HOST,
+            INTERNET_DEFAULT_HTTPS_PORT,
+            0,
+        ))?;
+        let object = HSTRING::from(path);
+        let request = Handle::new(WinHttpOpenRequest(
+            connection.0,
+            w!("GET"),
+            &object,
+            PCWSTR::null(),
+            PCWSTR::null(),
+            std::ptr::null(),
+            WINHTTP_FLAG_SECURE,
+        ))?;
+        WinHttpSendRequest(request.0, None, None, 0, 0, 0).ok()?;
+        WinHttpReceiveResponse(request.0, std::ptr::null_mut()).ok()?;
+        let mut status = 0u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        WinHttpQueryHeaders(
+            request.0,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            PCWSTR::null(),
+            Some((&raw mut status).cast()),
+            &raw mut size,
+            std::ptr::null_mut(),
+        )
+        .ok()?;
+        if status != 200 {
+            return None;
+        }
+        let mut body = Vec::new();
+        loop {
+            let mut available = 0u32;
+            WinHttpQueryDataAvailable(request.0, &raw mut available).ok()?;
+            if available == 0 {
+                break;
+            }
+            let start = body.len();
+            if start + available as usize > MAX_BYTES {
+                return None;
+            }
+            body.resize(start + available as usize, 0);
+            let mut read = 0u32;
+            WinHttpReadData(
+                request.0,
+                body[start..].as_mut_ptr().cast(),
+                available,
+                &raw mut read,
+            )
+            .ok()?;
+            body.truncate(start + read as usize);
+        }
+        Some(body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode;
+
+    #[test]
+    fn encodes_query_values() {
+        assert_eq!(encode("A b&c"), "A%20b%26c");
+        assert_eq!(encode("ñ"), "%C3%B1");
+        assert_eq!(encode("safe-_.~"), "safe-_.~");
+    }
+}

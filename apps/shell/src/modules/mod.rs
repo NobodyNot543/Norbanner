@@ -5,6 +5,7 @@ pub mod bar;
 pub mod categories;
 pub mod dashboard;
 pub mod launcher;
+pub mod lyrics;
 pub mod osd;
 pub mod session;
 pub mod window_list;
