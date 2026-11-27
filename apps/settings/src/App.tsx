@@ -45,6 +45,15 @@ function paletteStyle(palette: Palette | null): CSSProperties {
   return vars as CSSProperties;
 }
 
+/** Whether the scheme is a light one, judged by its surface colour, so the
+    window's native parts (scrollbar, dropdowns) and the logo follow it. */
+function isLightPalette(palette: Palette | null): boolean {
+  const hex = palette?.surface?.replace("#", "");
+  if (!hex || hex.length !== 6) return false;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
+}
+
 const HOTKEYS = ["super", "alt+space", "ctrl+space", "none"] as const;
 
 export function App() {
@@ -233,7 +242,8 @@ export function App() {
       </Card>
       <Card title={t.barLogo}>
         <div className="logo-picker">
-          <img className="logo-preview" src={config.bar.logo ? customLogo ?? norbannerLogo : norbannerLogo} alt="" />
+          <img className={config.bar.logo && customLogo ? "logo-preview" : "logo-preview brand-logo"}
+            src={config.bar.logo ? customLogo ?? norbannerLogo : norbannerLogo} alt="" />
           <div className="logo-text">
             <span className="row-label">{config.bar.logo ? t.logoCustom : t.logoDefault}</span>
             <span className={config.bar.logo ? "row-hint logo-path" : "row-hint"} title={config.bar.logo || undefined}>{config.bar.logo || t.barLogoHint}</span>
@@ -466,7 +476,7 @@ export function App() {
     about: <>
       <Card>
         <div className="about">
-          <img className="about-logo" src={norbannerLogo} alt="" />
+          <img className="about-logo brand-logo" src={norbannerLogo} alt="" />
           <div>
             <h2 className="about-title">Norbanner</h2>
             <p className="about-body">{t.aboutBody}</p>
@@ -484,10 +494,11 @@ export function App() {
   };
 
   return (
-    <div className="app" style={paletteStyle(palette)} data-mode={config.theme.mode}>
+    <div className="app" style={paletteStyle(palette)} data-mode={config.theme.mode}
+      data-scheme={isLightPalette(palette) ? "light" : "dark"}>
       <nav className="nav" data-tauri-drag-region>
         <div className="nav-header" data-tauri-drag-region>
-          <img className="nav-logo" src={norbannerLogo} alt="" />
+          <img className="nav-logo brand-logo" src={norbannerLogo} alt="" />
           <span className="nav-titles" data-tauri-drag-region>
             <span className="nav-title">{t.title}</span>
             <span className="nav-subtitle">{t.subtitle}</span>
