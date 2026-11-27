@@ -43,7 +43,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFMDBFNjAyM0QxMEI1MUEKUldRYXRSQTlBdVlBcmhRSFU5M1NwckZ3VzZJVkpuYVR4cjRDWldtV2RyRURHSjYyTm9jS1dSa1MK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBBODREMTZFRDAwNUIzM0IKUldRN3N3WFFidEdFQ3VEYm1uYytNSTlTTGM3V0t5UlQxcVpBc0NWMW5qYWNQenA5amVPRmxjSlIK",
       "endpoints": [
         "https://github.com/NobodyNot543/Norbanner/releases/latest/download/latest.json"
       ],

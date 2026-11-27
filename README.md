@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/brand/norbanner-readme.png" alt="Norbanner logo" width="128">
+
 ### Norbanner — a Caelestia-style desktop shell for Windows
 
   A frame around the screen, a vertical bar and drawers that grow out of its
@@ -8,6 +10,8 @@
   [English](README.md) · [Español](README.es.md) · [Français](README.fr.md)
 
 </div>
+
+![Norbanner on Windows: the bar on the left and the dashboard open at the top](assets/screenshots/norbanner-desktop.jpg)
 
 Norbanner brings the look and feel of [Caelestia](https://github.com/caelestia-dots/shell),
 the Quickshell shell for Hyprland, to Windows 10 and 11. It is written in Rust on

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/brand/norbanner-readme.png" alt="Logo de Norbanner" width="128">
+
 ### Norbanner — un shell de bureau façon Caelestia pour Windows
 
   Un cadre autour de l'écran, une barre verticale et des panneaux qui sortent
@@ -8,6 +10,8 @@
   [English](README.md) · [Español](README.es.md) · [Français](README.fr.md)
 
 </div>
+
+![Norbanner sous Windows : la barre à gauche et le panneau ouvert en haut](assets/screenshots/norbanner-desktop.jpg)
 
 Norbanner apporte l'allure et le comportement de
 [Caelestia](https://github.com/caelestia-dots/shell), le shell Quickshell pour
