@@ -6,6 +6,21 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.26]
+
+### English
+
+- Settings reads well in light mode: titles and labels are dark, the
+  Norbanner logo sits on a dark tile, and the selected options stand out.
+  The scrollbar and dropdowns follow the light scheme too.
+
+### Español
+
+- Configuración se lee bien en modo claro: los títulos y textos salen
+  oscuros, el logo de Norbanner va sobre una placa oscura y las opciones
+  seleccionadas se distinguen. La barra de desplazamiento y los
+  desplegables también siguen el tema claro.
+
 ## [0.1.25]
 
 ### English

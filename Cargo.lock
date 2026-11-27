@@ -2246,7 +2246,7 @@ dependencies = [
 
 [[package]]
 name = "norbanner"
-version = "0.1.25"
+version = "0.1.26"
 dependencies = [
  "anyhow",
  "norbanner-config",
@@ -2264,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "norbanner-config"
-version = "0.1.25"
+version = "0.1.26"
 dependencies = [
  "serde",
  "serde_json",
@@ -2273,11 +2273,11 @@ dependencies = [
 
 [[package]]
 name = "norbanner-core"
-version = "0.1.25"
+version = "0.1.26"
 
 [[package]]
 name = "norbanner-settings"
-version = "0.1.25"
+version = "0.1.26"
 dependencies = [
  "base64 0.23.1",
  "norbanner-config",
@@ -2295,7 +2295,7 @@ dependencies = [
 
 [[package]]
 name = "norbanner-shell"
-version = "0.1.25"
+version = "0.1.26"
 dependencies = [
  "thiserror 2.0.21",
  "windows",
@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "norbanner-theme"
-version = "0.1.25"
+version = "0.1.26"
 dependencies = [
  "material-colors",
  "serde",
