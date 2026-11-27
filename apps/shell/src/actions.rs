@@ -42,6 +42,8 @@ pub enum Action {
     Media(Control),
     /// Shows or hides the lyrics island.
     ToggleLyrics,
+    /// Moves the lyrics earlier (+) or later (−) by steps of a quarter second.
+    LyricsOffset(i32),
     ToggleMute,
     VolumeStep(i32),
     BrightnessStep(isize, i32),

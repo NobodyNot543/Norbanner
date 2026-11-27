@@ -40,6 +40,8 @@ const MAX_BYTES: usize = 512 * 1024;
 pub struct Song {
     pub title: String,
     pub artist: String,
+    /// Helps choose between versions of the song.
+    pub album: String,
 }
 
 /// The lyrics of a song: `None` when it has no synced lyrics.
@@ -118,8 +120,8 @@ fn run(
     }
 }
 
-/// Searches by title and artist and takes the synced lyrics of the result
-/// whose length is closest to the song's.
+/// Searches by title and artist, then lets [`lyrics::pick`] choose among
+/// the versions with synced lyrics (the one most volunteers agree on).
 fn lookup(song: &Song, length: Option<Duration>) -> Option<Vec<Line>> {
     if song.title.trim().is_empty() {
         return None;
@@ -130,29 +132,34 @@ fn lookup(song: &Song, length: Option<Duration>) -> Option<Vec<Line>> {
     }
     let body = get(&path)?;
     let results: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
-    let wanted = length.map(|l| l.as_secs_f64());
-    results
-        .iter()
-        .filter_map(|r| {
-            let synced = r.get("syncedLyrics")?.as_str()?;
-            let lines = lyrics::parse(synced);
-            if lines.is_empty() {
-                return None;
-            }
-            let off = match (
-                wanted,
-                r.get("duration").and_then(serde_json::Value::as_f64),
-            ) {
-                (Some(wanted), Some(duration)) => (wanted - duration).abs(),
-                _ => 0.0,
-            };
-            Some((off, lines))
-        })
-        // A version more than a few seconds longer or shorter is another
-        // recording; its timings would not match.
-        .filter(|(off, _)| *off <= 5.0)
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, lines)| lines)
+    let mut versions = Vec::new();
+    let mut candidates = Vec::new();
+    for result in &results {
+        let Some(lines) = result
+            .get("syncedLyrics")
+            .and_then(serde_json::Value::as_str)
+            .map(lyrics::parse)
+            .filter(|lines| !lines.is_empty())
+        else {
+            continue;
+        };
+        candidates.push(lyrics::Candidate {
+            duration: result.get("duration").and_then(serde_json::Value::as_f64),
+            album: result
+                .get("albumName")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            first: lines[0].at,
+        });
+        versions.push(lines);
+    }
+    let chosen = lyrics::pick(
+        &candidates,
+        length.map(|length| length.as_secs_f64()),
+        &song.album,
+    )?;
+    Some(versions.swap_remove(chosen))
 }
 
 /// Percent-encodes a query value.

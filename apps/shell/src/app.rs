@@ -415,6 +415,8 @@ pub struct App {
     bluetooth: Option<bluetooth::Monitor>,
     media: Option<media::Watch>,
     lyrics: Option<crate::lyrics::Fetcher>,
+    /// Timing corrections the user made per song this session, in ms.
+    lyrics_offsets: std::collections::HashMap<crate::lyrics::Song, i32>,
     desktops_watch: Option<RegistryWatch>,
     /// `Control Panel\Desktop`, where Windows records the wallpaper however
     /// it is changed (Settings, slideshow, Spotlight, another app).
@@ -515,6 +517,7 @@ impl App {
             bluetooth: bluetooth::Monitor::new(control.0 as isize, WM_BLUETOOTH).ok(),
             media: media::Watch::start(control, WM_MEDIA),
             lyrics: crate::lyrics::Fetcher::start(control, WM_LYRICS),
+            lyrics_offsets: std::collections::HashMap::new(),
             desktops_watch: RegistryWatch::new(
                 desktops::WATCH_KEY,
                 true,
@@ -1052,8 +1055,8 @@ impl App {
     }
 
     /// Brings the lyrics island up to date with the playing song: looks the
-    /// song up if needed, picks the line being sung, and sets a one-shot
-    /// timer for the next one. Nothing runs between lines.
+    /// song up if needed, picks the line and word being sung, and sets a
+    /// one-shot timer for the next change. Nothing runs in between.
     fn sync_lyrics(&mut self) {
         let now = Instant::now();
         let track = self
@@ -1061,20 +1064,19 @@ impl App {
             .media
             .as_ref()
             .filter(|_| self.config.dashboard.lyrics);
-        let lines = match (&mut self.lyrics, track) {
-            (Some(fetcher), Some(track)) => {
-                let song = crate::lyrics::Song {
-                    title: track.title.clone(),
-                    artist: track.artist.clone(),
-                };
-                fetcher
-                    .get(&song, track.timeline.map(|timeline| timeline.duration))
-                    .flatten()
-            }
+        let song = track.map(|track| crate::lyrics::Song {
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+        });
+        let lines = match (&mut self.lyrics, track, &song) {
+            (Some(fetcher), Some(track), Some(song)) => fetcher
+                .get(song, track.timeline.map(|timeline| timeline.duration))
+                .flatten(),
             _ => None,
         };
         let timeline = track.and_then(|track| track.timeline);
-        let Some(lines) = lines else {
+        let (Some(lines), Some(song)) = (lines, song) else {
             // SAFETY: Stops our own timer; harmless if it is not running.
             unsafe {
                 let _ = KillTimer(Some(self.control), TIMER_LYRICS);
@@ -1084,16 +1086,41 @@ impl App {
             }
             return;
         };
-        let position = timeline.map(|timeline| timeline.position_at(now) + LYRICS_LEAD);
+        let offset_ms = self.lyrics_offsets.get(&song).copied().unwrap_or(0);
+        let position = timeline.map(|timeline| {
+            let at = timeline.position_at(now) + LYRICS_LEAD;
+            if offset_ms >= 0 {
+                at + Duration::from_millis(offset_ms.unsigned_abs().into())
+            } else {
+                at.saturating_sub(Duration::from_millis(offset_ms.unsigned_abs().into()))
+            }
+        });
         let current =
             position.and_then(|position| norbanner_core::lyrics::index_at(&lines, position));
+        let words = current.zip(position).map_or(0, |(i, position)| {
+            norbanner_core::lyrics::words_at(&lines[i], position)
+        });
+        let mut dirty = false;
         match &mut self.state.lyrics {
             Some(view) if Arc::ptr_eq(&view.lines, &lines) => {
                 if view.current != current {
                     view.previous = view.current;
                     view.current = current;
                     view.changed = now;
-                    self.mark_all_dirty();
+                    view.previous_words = 0;
+                    view.words = words;
+                    view.word_changed = now;
+                    dirty = true;
+                } else if view.words != words {
+                    view.previous_words = view.words;
+                    view.words = words;
+                    view.word_changed = now;
+                    dirty = true;
+                }
+                if view.offset_ms != offset_ms {
+                    view.offset_ms = offset_ms;
+                    view.offset_changed = Some(now);
+                    dirty = true;
                 }
             }
             _ => {
@@ -1102,9 +1129,17 @@ impl App {
                     current,
                     previous: None,
                     changed: now,
+                    words,
+                    previous_words: 0,
+                    word_changed: now,
+                    offset_ms,
+                    offset_changed: None,
                 });
-                self.mark_all_dirty();
+                dirty = true;
             }
+        }
+        if dirty {
+            self.mark_all_dirty();
         }
         let next = timeline
             .filter(|timeline| timeline.advancing(now))
@@ -1386,6 +1421,18 @@ impl App {
                 self.sync_lyrics();
                 self.mark_all_dirty();
             }
+            Action::LyricsOffset(step) => {
+                if let Some(track) = &self.state.media {
+                    let song = crate::lyrics::Song {
+                        title: track.title.clone(),
+                        artist: track.artist.clone(),
+                        album: track.album.clone(),
+                    };
+                    let offset = self.lyrics_offsets.entry(song).or_insert(0);
+                    *offset = (*offset + step * 250).clamp(-10_000, 10_000);
+                }
+                self.sync_lyrics();
+            }
             Action::ToggleMute => {
                 if let Some(audio) = &mut self.audio {
                     let _ = audio.toggle_mute();
@@ -1653,6 +1700,7 @@ impl App {
                     }
                     Some(Action::StepDesktop(_)) => self.perform(Action::StepDesktop(-step)),
                     Some(Action::CalendarMonth(_)) => self.perform(Action::CalendarMonth(-step)),
+                    Some(Action::LyricsOffset(_)) => self.perform(Action::LyricsOffset(step)),
                     Some(Action::LauncherListScroll(_)) => {
                         self.perform(Action::LauncherListScroll(-step));
                     }
@@ -2117,9 +2165,11 @@ impl App {
         // dashboard (which opens over the same spot).
         let anim_scale = self.config.appearance.anim_scale;
         let has_lyrics = lyrics_on && self.state.lyrics.is_some();
-        let line_moving = self.state.lyrics.as_ref().is_some_and(|view| {
-            crate::modules::lyrics::change_progress(view, anim_scale, now) < 1.0
-        });
+        let line_moving = self
+            .state
+            .lyrics
+            .as_ref()
+            .is_some_and(|view| crate::modules::lyrics::moving(view, anim_scale, now));
         for screen in &mut self.screens {
             let want = has_lyrics && !screen.dashboard.wanted && !screen.is_fullscreen;
             if want != screen.lyrics.wanted {

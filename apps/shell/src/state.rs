@@ -160,13 +160,22 @@ pub struct SystemState {
 }
 
 /// The lyrics island's content: the song's lines, the one being sung and
-/// the one before it, and when they last changed (for the slide between).
+/// the one before it, and when they last changed (for the slide between);
+/// how many words of the line are sung (for the colour sweep) and since
+/// when; and the user's timing correction for this song.
 #[derive(Clone)]
 pub struct LyricsView {
     pub lines: Arc<Vec<norbanner_core::lyrics::Line>>,
     pub current: Option<usize>,
     pub previous: Option<usize>,
     pub changed: Instant,
+    pub words: usize,
+    pub previous_words: usize,
+    pub word_changed: Instant,
+    /// Milliseconds added to the song's position (scroll on the island).
+    pub offset_ms: i32,
+    /// When the correction last changed: it shows for a moment.
+    pub offset_changed: Option<Instant>,
 }
 
 /// What the icon worker sends back: the app id and, if found, its icon

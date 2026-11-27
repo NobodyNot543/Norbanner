@@ -99,6 +99,7 @@ pub struct Track {
     generation: u64,
     pub title: String,
     pub artist: String,
+    pub album: String,
     pub playing: bool,
     pub previous: bool,
     pub toggle: bool,
@@ -250,6 +251,7 @@ struct Current {
     timeline_event: Option<i64>,
     title: String,
     artist: String,
+    album: String,
     artwork: Option<Arc<IconImage>>,
 }
 
@@ -276,6 +278,7 @@ impl Current {
             timeline_event: None,
             title: String::new(),
             artist: String::new(),
+            album: String::new(),
             artwork: None,
         }
     }
@@ -285,6 +288,7 @@ impl Current {
         // song. Never pair yesterday's title/artist with the current session.
         self.title.clear();
         self.artist.clear();
+        self.album.clear();
         self.artwork = None;
         if let Some(properties) = self
             .session
@@ -298,6 +302,10 @@ impl Current {
                 .unwrap_or_default();
             self.artist = properties
                 .Artist()
+                .map(|value| value.to_string_lossy())
+                .unwrap_or_default();
+            self.album = properties
+                .AlbumTitle()
                 .map(|value| value.to_string_lossy())
                 .unwrap_or_default();
             self.artwork = properties.Thumbnail().ok().and_then(read_artwork);
@@ -354,6 +362,7 @@ impl Current {
             generation,
             title: self.title.clone(),
             artist: self.artist.clone(),
+            album: self.album.clone(),
             artwork: self.artwork.clone(),
             playing,
             timeline,
