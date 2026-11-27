@@ -1,0 +1,12 @@
+[package]
+name = "norbanner-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+material-colors = { version = "0.5", features = ["quantize"] }
+serde.workspace = true

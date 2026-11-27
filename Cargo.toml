@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/shell", "apps/settings/src-tauri"]
+
+[workspace.package]
+version = "0.1.24"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+windows = "0.62"
+windows-core = "0.62"
+windows-numerics = "0.3"
+norbanner-config = { path = "crates/norbanner-config" }
+norbanner-core = { path = "crates/norbanner-core" }
+norbanner-shell = { path = "crates/norbanner-shell" }
+norbanner-theme = { path = "crates/norbanner-theme" }
+
+[workspace.lints.clippy]
+perf = { level = "deny", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+# Un fallo cierra el proceso sin mÃ¡s: el guardiÃ¡n devuelve la barra de tareas.
+panic = "abort"
