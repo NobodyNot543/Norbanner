@@ -6,6 +6,30 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.28]
+
+### English
+
+- The lyrics island keeps time with the song. Lyric services hold several
+  volunteer timings of the same recording that can disagree by seconds;
+  Norbanner now takes the one most of them agree on, using the song's
+  album to break ties.
+- A sweep of colour fills the line word by word as it is sung.
+- Scrolling over the island moves the lyrics earlier or later by a quarter
+  second, remembered for that song until the shell restarts.
+
+### Español
+
+- La isla de letras va al ritmo de la canción. Los servicios de letras
+  guardan varias sincronizaciones de la misma grabación hechas por
+  voluntarios que pueden diferir en segundos; Norbanner toma ahora aquella
+  en la que más coinciden, y usa el álbum de la canción para desempatar.
+- Un barrido de color rellena el verso palabra por palabra a medida que se
+  canta.
+- Girar la rueda del ratón sobre la isla adelanta o atrasa la letra un
+  cuarto de segundo, y se recuerda para esa canción hasta reiniciar la
+  shell.
+
 ## [0.1.27]
 
 ### English
