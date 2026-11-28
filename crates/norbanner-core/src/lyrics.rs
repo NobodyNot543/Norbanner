@@ -148,12 +148,20 @@ fn estimate_words(lines: &mut [Line]) {
         let ranges = word_ranges(&lines[i].text);
         let weight = |(s, e): (usize, usize)| lines[i].text[s..e].chars().count() as f32 + 1.0;
         let total: f32 = ranges.iter().copied().map(weight).sum();
-        // About 15 characters a second, with a little room for breath.
+        // A line is usually sung over most of the time until the next one,
+        // however slowly. Only before a long pause (an instrumental break)
+        // is that time not all singing: then about 15 characters a second,
+        // with room to stretch.
         let natural = 0.3 + total / 15.0;
         let gap = lines
             .get(i + 1)
-            .map(|next| next.at.saturating_sub(lines[i].at).as_secs_f32() * 0.92);
-        let sung = gap.map_or(natural, |gap| gap.min(natural)).max(0.05);
+            .map(|next| next.at.saturating_sub(lines[i].at).as_secs_f32());
+        let sung = match gap {
+            Some(gap) if gap <= 8.0 => gap * 0.92,
+            Some(gap) => (gap * 0.92).min(natural * 2.0),
+            None => natural * 2.0,
+        }
+        .max(0.05);
         let start = lines[i].at;
         let mut before = 0.0;
         let words = ranges
@@ -495,6 +503,9 @@ mod tests {
         assert_eq!(lines[0].words.len(), 1);
         let lines = parse("[00:10.00]two words\n[00:40.00]next");
         assert!(lines[0].words[1].at < ms(11_000));
+        // A slow line, sung over six seconds, is spread over them.
+        let lines = parse("[00:10.00]one two three four\n[00:16.00]next");
+        assert!(lines[0].words[3].at > ms(13_500));
     }
 
     #[test]

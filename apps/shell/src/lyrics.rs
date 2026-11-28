@@ -33,7 +33,9 @@ const HOST: PCWSTR = w!("lrclib.net");
 /// lrclib asks clients to name themselves.
 const AGENT: PCWSTR = w!("Norbanner (https://github.com/NobodyNot543/Norbanner)");
 /// Lyric files are small; anything bigger is not one.
-const MAX_BYTES: usize = 512 * 1024;
+// A search answers with every version of the song, each with its plain and
+// its synced lyrics: 600 KB for a popular song is common.
+const MAX_BYTES: usize = 8 * 1024 * 1024;
 
 /// Which song a lookup is for.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
