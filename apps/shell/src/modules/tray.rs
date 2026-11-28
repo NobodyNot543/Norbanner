@@ -53,6 +53,7 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
             c,
         );
         let tile = r.inset(t.padding.extra_small);
+        let over = ui.hovered(tile);
         if ui.button(
             tile,
             t.rounding.medium,
@@ -72,6 +73,32 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
             ui.p.image_fit(app.key, icon, icon_rect);
         } else {
             ui.p.icon(icons::APPS, cx, cy, side, 0.0, pal.on_surface_variant);
+        }
+        // Close, in the corner while the pointer is on the app. Pushed after
+        // the tile so it wins the click.
+        if over {
+            let x_side = tile.w * 0.42;
+            let close = Rect::new(
+                tile.right() - x_side * 0.8,
+                tile.y - x_side * 0.2,
+                x_side,
+                x_side,
+            );
+            if ui.icon_button(
+                close,
+                icons::CLOSE,
+                x_side * 0.7,
+                0.0,
+                Some(pal.error_container),
+                pal.on_error_container,
+                Action::CloseTrayApp(app.path.clone()),
+            ) {
+                hovered_name = Some(format!(
+                    "{} · {}",
+                    crate::strings::text().tray_close,
+                    app.name
+                ));
+            }
         }
     }
     // The last cell: Windows' own tray (menus, settings of each icon).

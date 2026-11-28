@@ -50,6 +50,8 @@ pub enum Action {
     OpenTray,
     /// Brings forward (or opens) a background app from the tray bubble.
     OpenTrayApp(String),
+    /// Closes a background app from the tray bubble.
+    CloseTrayApp(String),
     OpenNetworkSettings,
     OpenBluetoothSettings,
     OpenSoundSettings,

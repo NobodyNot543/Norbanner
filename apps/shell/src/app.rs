@@ -102,8 +102,9 @@ const TIMER_WALLPAPER: usize = 5;
 const TIMER_LYRICS: usize = 6;
 /// Moves the lyrics island's wave while a song plays.
 const TIMER_WAVE: usize = 7;
-/// Lines show this much early, so their slide ends as they are sung.
-const LYRICS_LEAD: Duration = Duration::from_millis(200);
+/// Lines show this much early, so their slide is under way as they are
+/// sung (the word sweep itself follows the exact position).
+const LYRICS_LEAD: Duration = Duration::from_millis(80);
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 static CONFIG_CHANGED: AtomicU32 = AtomicU32::new(0);
@@ -1603,6 +1604,31 @@ impl App {
                         .set(false, self.config.appearance.anim_scale, Instant::now());
                 }
                 self.mark_all_dirty();
+            }
+            Action::CloseTrayApp(path) => {
+                // It leaves the bubble at once; the list is read again once
+                // the app has closed.
+                self.state.tray.retain(|app| app.path != path);
+                self.mark_all_dirty();
+                let tx = self.work_tx.clone();
+                let control = self.control.0 as isize;
+                let _ = thread::Builder::new()
+                    .name("tray-quit".into())
+                    .spawn(move || {
+                        norbanner_shell::tray_apps::quit(&path);
+                        // SAFETY: COM for this worker thread only (icons decode with WIC).
+                        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+                        let _ = tx.send(Work::Tray(norbanner_shell::tray_apps::running()));
+                        // SAFETY: As in `start_workers`.
+                        unsafe {
+                            let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                                Some(HWND(control as *mut _)),
+                                WM_WORKER,
+                                WPARAM(0),
+                                LPARAM(0),
+                            );
+                        }
+                    });
             }
             Action::OpenTray => {
                 let mut point = POINT::default();

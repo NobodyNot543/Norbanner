@@ -180,86 +180,138 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
     let before = ui.p.opacity;
     // `sung` is how many words are filled, and how many were before the
     // sweep started (it moves from one to the other).
-    let line =
-        |ui: &mut Ui, index: Option<usize>, offset: f32, alpha: f32, sung: (usize, usize)| {
-            if alpha <= 0.01 {
-                return;
-            }
-            ui.p.opacity = before * alpha;
-            let Some(line) = index
-                .and_then(|i| view.lines.get(i))
-                .filter(|l| !l.text.is_empty())
-            else {
-                // Before the first line, and instrumental gaps.
-                let (cx, cy) = Rect::new(inner.x, inner.y + offset, inner.w, inner.h).center();
-                ui.p.icon(icons::MUSIC_NOTE, cx, cy, t.icon.medium, 1.0, pal.primary);
-                return;
-            };
-            let mut style = TextStyle::new(t.font.normal).weight(500.0);
-            let (full, _) = ui.p.measure(&line.text, style);
-            if full > inner.w {
-                style.size *= (inner.w / full).max(0.72);
-            }
-            let (width, _) = ui.p.measure(&line.text, style);
-            let (cx, _) = inner.center();
-            let r = Rect::new(cx - width / 2.0, inner.y + offset, width + 4.0, inner.h);
-            if !mode.by_word() {
-                ui.p.text(&line.text, r, style, pal.primary);
-                return;
-            }
-            ui.p.text(
-                &line.text,
-                r,
-                style,
-                pal.on_surface_variant.with_alpha(0.55),
-            );
-            let reach = |ui: &mut Ui, words: usize| -> f32 {
-                match words.checked_sub(1).and_then(|i| line.words.get(i)) {
-                    Some(word) => ui.p.measure(&line.text[..word.end], style).0,
-                    None => 0.0,
-                }
-            };
-            let (to, from) = sung;
-            if mode == Mode::Word {
-                // Words already sung settle to the text colour; the one
-                // being sung lights up in the accent.
-                let done = reach(ui, to.saturating_sub(1));
-                let end = reach(ui, to);
-                if done > 0.5 {
-                    ui.p.clip(Rect::new(r.x - 2.0, r.y, done + 2.0, r.h));
-                    ui.p.text(&line.text, r, style, pal.on_surface);
-                    ui.p.unclip();
-                }
-                if end > done {
-                    let lit = if to == from { 1.0 } else { word_p };
-                    let saved = ui.p.opacity;
-                    ui.p.opacity = saved * lit;
-                    ui.p.clip(Rect::new(r.x + done, r.y, end - done + 2.0, r.h));
-                    ui.p.text(&line.text, r, style, pal.primary);
-                    ui.p.unclip();
-                    ui.p.opacity = saved;
-                }
-                return;
-            }
-            let fill = if to == from {
-                reach(ui, to)
+    // Where the song is, with the user's correction: the sweep follows it.
+    let position = ui
+        .state
+        .media
+        .as_ref()
+        .and_then(|track| track.timeline)
+        .map(|timeline| {
+            let at = timeline.position_at(now);
+            let offset = Duration::from_millis(view.offset_ms.unsigned_abs().into());
+            if view.offset_ms >= 0 {
+                at + offset
             } else {
-                let start = reach(ui, from);
-                start + (reach(ui, to) - start) * word_p
-            };
-            if fill > 0.5 {
-                ui.p.clip(Rect::new(r.x - 2.0, r.y, fill + 2.0, r.h));
-                ui.p.text(&line.text, r, style, pal.primary);
-                ui.p.unclip();
+                at.saturating_sub(offset)
+            }
+        });
+    let line = |ui: &mut Ui,
+                index: Option<usize>,
+                offset: f32,
+                alpha: f32,
+                sung: (usize, usize),
+                at: Option<Duration>| {
+        if alpha <= 0.01 {
+            return;
+        }
+        ui.p.opacity = before * alpha;
+        let Some(line) = index
+            .and_then(|i| view.lines.get(i))
+            .filter(|l| !l.text.is_empty())
+        else {
+            // Before the first line, and instrumental gaps.
+            let (cx, cy) = Rect::new(inner.x, inner.y + offset, inner.w, inner.h).center();
+            ui.p.icon(icons::MUSIC_NOTE, cx, cy, t.icon.medium, 1.0, pal.primary);
+            return;
+        };
+        let mut style = TextStyle::new(t.font.normal).weight(500.0);
+        let (full, _) = ui.p.measure(&line.text, style);
+        if full > inner.w {
+            style.size *= (inner.w / full).max(0.72);
+        }
+        let (width, _) = ui.p.measure(&line.text, style);
+        let (cx, _) = inner.center();
+        let r = Rect::new(cx - width / 2.0, inner.y + offset, width + 4.0, inner.h);
+        if !mode.by_word() {
+            ui.p.text(&line.text, r, style, pal.primary);
+            return;
+        }
+        ui.p.text(
+            &line.text,
+            r,
+            style,
+            pal.on_surface_variant.with_alpha(0.55),
+        );
+        let reach = |ui: &mut Ui, words: usize| -> f32 {
+            match words.checked_sub(1).and_then(|i| line.words.get(i)) {
+                Some(word) => ui.p.measure(&line.text[..word.end], style).0,
+                None => 0.0,
             }
         };
+        let (to, from) = sung;
+        if mode == Mode::Word {
+            // Words already sung settle to the text colour; the one
+            // being sung lights up in the accent.
+            let done = reach(ui, to.saturating_sub(1));
+            let end = reach(ui, to);
+            if done > 0.5 {
+                ui.p.clip(Rect::new(r.x - 2.0, r.y, done + 2.0, r.h));
+                ui.p.text(&line.text, r, style, pal.on_surface);
+                ui.p.unclip();
+            }
+            if end > done {
+                let lit = if to == from { 1.0 } else { word_p };
+                let saved = ui.p.opacity;
+                ui.p.opacity = saved * lit;
+                ui.p.clip(Rect::new(r.x + done, r.y, end - done + 2.0, r.h));
+                ui.p.text(&line.text, r, style, pal.primary);
+                ui.p.unclip();
+                ui.p.opacity = saved;
+            }
+            return;
+        }
+        // The sweep follows the voice: through each word from when it
+        // starts until the next one does, at the song's own position.
+        // (The island already redraws for its wave while a song plays.)
+        let fill = match (at, index) {
+            (Some(at), Some(i)) => {
+                let started = norbanner_core::lyrics::words_at(line, at);
+                match started.checked_sub(1).map(|w| &line.words[w]) {
+                    Some(word) => {
+                        let next_line = view.lines.get(i + 1).map(|l| l.at);
+                        let end = line
+                            .words
+                            .get(started)
+                            .map(|w| w.at)
+                            .or(next_line)
+                            .unwrap_or(word.at + Duration::from_millis(800))
+                            .min(word.at + Duration::from_millis(1500));
+                        let span = end.saturating_sub(word.at).as_secs_f32().max(0.05);
+                        let through =
+                            (at.saturating_sub(word.at).as_secs_f32() / span).clamp(0.0, 1.0);
+                        let start = reach(ui, started - 1);
+                        start + (reach(ui, started) - start) * through
+                    }
+                    None => 0.0,
+                }
+            }
+            // The line leaving, or no position: as far as the words sung.
+            _ if to == from => reach(ui, to),
+            _ => {
+                let start = reach(ui, from);
+                start + (reach(ui, to) - start) * word_p
+            }
+        };
+        if fill > 0.5 {
+            ui.p.clip(Rect::new(r.x - 2.0, r.y, fill + 2.0, r.h));
+            ui.p.text(&line.text, r, style, pal.primary);
+            ui.p.unclip();
+        }
+    };
     if line_p < 1.0 {
         // The line that just ended leaves fully sung.
         let all = view
             .previous
             .and_then(|i| view.lines.get(i))
             .map_or(0, |l| l.words.len());
-        line(ui, view.previous, -rise * line_p, 1.0 - line_p, (all, all));
+        line(
+            ui,
+            view.previous,
+            -rise * line_p,
+            1.0 - line_p,
+            (all, all),
+            None,
+        );
     }
     line(
         ui,
@@ -267,6 +319,7 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
         rise * (1.0 - line_p),
         line_p,
         (view.words, view.previous_words),
+        position,
     );
     ui.p.opacity = before;
 

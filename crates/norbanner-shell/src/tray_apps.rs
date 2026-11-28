@@ -7,6 +7,7 @@
 //!
 //! Icons are decoded with WIC: call [`running`] on a thread with COM.
 
+use windows::Win32::Foundation::{HWND, LPARAM, WAIT_OBJECT_0, WPARAM};
 use windows::{
     Win32::{
         Foundation::{CloseHandle, ERROR_SUCCESS},
@@ -18,12 +19,61 @@ use windows::{
             },
             Threading::{
                 OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-                QueryFullProcessImageNameW,
+                PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, QueryFullProcessImageNameW,
+                TerminateProcess, WaitForSingleObject,
             },
         },
+        UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, PostMessageW, WM_CLOSE},
     },
-    core::{HSTRING, PCWSTR, PWSTR, w},
+    core::{BOOL, HSTRING, PCWSTR, PWSTR, w},
 };
+
+/// How long an app gets to close itself before it is ended.
+const GRACE_MS: u32 = 3000;
+
+/// Closes the program at `path`: asks each of its windows (hidden ones
+/// too, where tray apps keep theirs) to close, then ends the processes
+/// still running after a grace period. Tray apps often only hide on
+/// close, so asking is not always enough. Blocks: call it off the UI
+/// thread.
+pub fn quit(path: &str) {
+    let pids: Vec<u32> = running_programs()
+        .into_iter()
+        .filter(|(_, running)| running.eq_ignore_ascii_case(path))
+        .map(|(pid, _)| pid)
+        .collect();
+    if pids.is_empty() {
+        return;
+    }
+    unsafe extern "system" fn ask(hwnd: HWND, data: LPARAM) -> BOOL {
+        // SAFETY: `data` is the address of `pids` for this enumeration.
+        let pids = unsafe { &*(data.0 as *const Vec<u32>) };
+        let mut pid = 0u32;
+        // SAFETY: Plain window queries; the message is posted by value.
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&raw mut pid));
+            if pids.contains(&pid) {
+                let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+        }
+        BOOL(1)
+    }
+    // SAFETY: `pids` outlives the enumeration, which is synchronous; each
+    // process handle is closed after use.
+    unsafe {
+        let _ = EnumWindows(Some(ask), LPARAM(&raw const pids as isize));
+        for pid in pids {
+            let Ok(process) = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, false, pid)
+            else {
+                continue;
+            };
+            if WaitForSingleObject(process, GRACE_MS) != WAIT_OBJECT_0 {
+                let _ = TerminateProcess(process, 0);
+            }
+            let _ = CloseHandle(process);
+        }
+    }
+}
 
 use crate::{icons::IconImage, imagery};
 
@@ -47,9 +97,9 @@ pub fn running() -> Vec<TrayApp> {
         if leaf(&entry.program) == "explorer.exe" {
             continue;
         }
-        let Some(path) = processes
+        let Some((_, path)) = processes
             .iter()
-            .find(|path| same_program(&entry.program, path))
+            .find(|(_, path)| same_program(&entry.program, path))
         else {
             continue;
         };
@@ -217,8 +267,8 @@ unsafe fn binary(key: HKEY, sub: &HSTRING, value: PCWSTR) -> Option<Vec<u8>> {
     }
 }
 
-/// The full path of every running program.
-fn running_programs() -> Vec<String> {
+/// Every running program: its process id and full path.
+fn running_programs() -> Vec<(u32, String)> {
     let mut map = Vec::new();
     let mut pids = vec![0u32; 4096];
     let mut needed = 0u32;
@@ -244,7 +294,7 @@ fn running_programs() -> Vec<String> {
             )
             .is_ok()
             {
-                map.push(String::from_utf16_lossy(&buffer[..len as usize]));
+                map.push((pid, String::from_utf16_lossy(&buffer[..len as usize])));
             }
             let _ = CloseHandle(process);
         }
