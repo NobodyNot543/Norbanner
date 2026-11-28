@@ -6,6 +6,31 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.32]
+
+### English
+
+- The lyrics island finds lyrics for more songs. Music video titles such as
+  "Song (Official Video)" or "Artist - Song", and guest lists in the
+  artist, are cleaned before the search, and a general search follows when
+  the first finds nothing.
+- Songs whose length differs from every version the service has (a video
+  with a longer intro, a radio edit) now use the closest version up to
+  20 seconds away instead of showing no lyrics; scrolling over the island
+  corrects the timing if needed.
+
+### Español
+
+- La isla de letras encuentra la letra de más canciones. Los títulos de
+  videoclips como «Canción (Official Video)» o «Artista - Canción», y las
+  listas de invitados en el artista, se limpian antes de buscar, y si la
+  primera búsqueda no encuentra nada se hace una búsqueda general.
+- Las canciones cuya duración no coincide con ninguna versión del servicio
+  (un videoclip con una intro más larga, una versión de radio) usan ahora
+  la versión más cercana hasta 20 segundos de diferencia en lugar de no
+  mostrar letra; girar la rueda sobre la isla corrige el tiempo si hace
+  falta.
+
 ## [0.1.31]
 
 ### English
