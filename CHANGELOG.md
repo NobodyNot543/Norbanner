@@ -6,6 +6,31 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.33]
+
+### English
+
+- Songs no longer stay without lyrics after a network hiccup: a lookup that
+  could not reach the service is tried again every few seconds while the
+  song plays, instead of counting as "no lyrics" for the whole session.
+- The volume and brightness sliders on the right now include brightness
+  for a laptop's built-in screen (external monitors keep using DDC/CI).
+- The tray button in the bar opens the background apps bubble instead of
+  Windows' tray, and the bubble's arrow to Windows' tray is gone.
+
+### Español
+
+- Las canciones ya no se quedan sin letra después de un fallo de red: una
+  búsqueda que no pudo llegar al servicio se reintenta cada pocos segundos
+  mientras suena la canción, en lugar de contar como "sin letra" toda la
+  sesión.
+- Los deslizadores de volumen y brillo de la derecha incluyen ahora el
+  brillo de la pantalla integrada de los portátiles (los monitores externos
+  siguen usando DDC/CI).
+- El botón de la bandeja de la barra abre la burbuja de apps en segundo
+  plano en lugar de la bandeja de Windows, y se quitó la flecha de la
+  burbuja que llevaba a la bandeja de Windows.
+
 ## [0.1.32]
 
 ### English
