@@ -491,7 +491,7 @@ fn tray(ui: &mut Ui, rect: Rect) {
         0.0,
         None,
         pal.outline,
-        Action::OpenTray,
+        Action::ShowTrayBubble,
     );
 }
 

@@ -47,7 +47,8 @@ pub enum Action {
     ToggleMute,
     VolumeStep(i32),
     BrightnessStep(isize, i32),
-    OpenTray,
+    /// Opens the background apps bubble (a click on the tray button).
+    ShowTrayBubble,
     /// Brings forward (or opens) a background app from the tray bubble.
     OpenTrayApp(String),
     /// Closes a background app from the tray bubble.

@@ -48,12 +48,13 @@ pub struct Song {
     pub seconds: u64,
 }
 
-/// The lyrics of a song: `None` when it has no synced lyrics.
-pub type Found = (Song, Option<Arc<Vec<Line>>>);
+/// A finished lookup: the lyrics (`None` when the song has none), or `Err`
+/// when the service could not be reached, which is tried again later.
+pub type Found = (Song, Result<Option<Arc<Vec<Line>>>, ()>);
 
 pub struct Fetcher {
     requests: SyncSender<(Song, Option<Duration>)>,
-    results: Arc<Mutex<Option<Found>>>,
+    results: Arc<Mutex<Vec<Found>>>,
     cache: HashMap<Song, Option<Arc<Vec<Line>>>>,
     pending: Option<Song>,
 }
@@ -62,7 +63,7 @@ impl Fetcher {
     /// Starts the worker; it posts `message` to `hwnd` when a lookup ends.
     pub fn start(hwnd: HWND, message: u32) -> Option<Self> {
         let (requests, inbox) = mpsc::sync_channel(1);
-        let results = Arc::new(Mutex::new(None));
+        let results = Arc::new(Mutex::new(Vec::new()));
         let window = hwnd.0 as isize;
         {
             let results = results.clone();
@@ -80,8 +81,8 @@ impl Fetcher {
     }
 
     /// The lyrics for `song` if they are known; otherwise starts a lookup
-    /// (one at a time; a newer song replaces a queued one) and returns
-    /// `None` until it ends.
+    /// (one at a time) and returns `None` until it ends. Called again while
+    /// the song plays, it starts the lookup once the worker is free.
     pub fn get(&mut self, song: &Song, length: Option<Duration>) -> Option<Option<Arc<Vec<Line>>>> {
         if let Some(known) = self.cache.get(song) {
             return Some(known.clone());
@@ -94,28 +95,48 @@ impl Fetcher {
         None
     }
 
-    /// Takes a finished lookup into the cache.
+    /// Takes every finished lookup: found or not found go into the cache;
+    /// a song whose lookup failed (no network, the service too slow) is
+    /// left out, so asking again looks it up again.
     pub fn collect(&mut self) {
-        let Some((song, lines)) = self.results.lock().ok().and_then(|mut r| r.take()) else {
-            return;
-        };
-        if self.pending.as_ref() == Some(&song) {
-            self.pending = None;
+        let finished = self
+            .results
+            .lock()
+            .map(|mut results| std::mem::take(&mut *results))
+            .unwrap_or_default();
+        for (song, outcome) in finished {
+            if self.pending.as_ref() == Some(&song) {
+                self.pending = None;
+            }
+            match outcome {
+                Ok(lines) => {
+                    if lines.is_none() {
+                        norbanner_shell::log::line(&format!(
+                            "lyrics: no synced lyrics for \"{}\" by {}",
+                            song.title, song.artist
+                        ));
+                    }
+                    self.cache.insert(song, lines);
+                }
+                Err(()) => norbanner_shell::log::line(&format!(
+                    "lyrics: lookup failed for \"{}\" by {}; will try again",
+                    song.title, song.artist
+                )),
+            }
         }
-        self.cache.insert(song, lines);
     }
 }
 
 fn run(
     inbox: &Receiver<(Song, Option<Duration>)>,
-    results: &Mutex<Option<Found>>,
+    results: &Mutex<Vec<Found>>,
     window: isize,
     message: u32,
 ) {
     while let Ok((song, length)) = inbox.recv() {
-        let lines = lookup(&song, length).map(Arc::new);
-        if let Ok(mut slot) = results.lock() {
-            *slot = Some((song, lines));
+        let outcome = lookup(&song, length).map(|lines| lines.map(Arc::new));
+        if let Ok(mut queue) = results.lock() {
+            queue.push((song, outcome));
         }
         // SAFETY: Posts a notification by value to the shell's own window.
         unsafe {
@@ -129,11 +150,11 @@ fn run(
 /// first by title and main artist, then with a general search, then with
 /// the player's own words. [`lyrics::pick`] chooses among the versions with
 /// synced lyrics each time; the first search that yields one wins.
-fn lookup(song: &Song, length: Option<Duration>) -> Option<Vec<Line>> {
+fn lookup(song: &Song, length: Option<Duration>) -> Result<Option<Vec<Line>>, ()> {
     let title = lyrics::clean_title(&song.title, &song.artist);
     let artist = lyrics::main_artist(&song.artist);
     if title.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut searches = Vec::new();
     let mut by_fields = format!("/api/search?track_name={}", encode(&title));
@@ -153,8 +174,18 @@ fn lookup(song: &Song, length: Option<Duration>) -> Option<Vec<Line>> {
         searches.push(raw);
     }
     let artist_lower = artist.to_lowercase();
-    searches.iter().find_map(|path| {
-        let body = get(path)?;
+    // A search that could not reach the service makes the whole lookup a
+    // failure (tried again later) unless another one found the lyrics.
+    let mut failed = false;
+    let found = searches.iter().find_map(|path| {
+        let body = match get(path) {
+            Ok(Some(body)) => body,
+            Ok(None) => return None,
+            Err(()) => {
+                failed = true;
+                return None;
+            }
+        };
         let results: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
         let mut versions = Vec::new();
         let mut candidates = Vec::new();
@@ -193,7 +224,12 @@ fn lookup(song: &Song, length: Option<Duration>) -> Option<Vec<Line>> {
             &song.album,
         )?;
         Some(versions.swap_remove(chosen))
-    })
+    });
+    match found {
+        Some(lines) => Ok(Some(lines)),
+        None if failed => Err(()),
+        None => Ok(None),
+    }
 }
 
 /// Percent-encodes a query value.
@@ -227,8 +263,19 @@ impl Drop for Handle {
     }
 }
 
-/// An HTTPS GET of `path` on lrclib; the body of a 200 response.
-fn get(path: &str) -> Option<Vec<u8>> {
+/// An HTTPS GET of `path` on lrclib: the body of a 200 response,
+/// `Ok(None)` for any other answer (nothing there), `Err` when the service
+/// could not be reached or did not answer in time.
+fn get(path: &str) -> Result<Option<Vec<u8>>, ()> {
+    match request(path) {
+        Some((200, body)) => Ok(Some(body)),
+        Some(_) => Ok(None),
+        None => Err(()),
+    }
+}
+
+/// The status and, for a 200, the body; `None` on a transport failure.
+fn request(path: &str) -> Option<(u32, Vec<u8>)> {
     // SAFETY: Plain WinHTTP calls on handles owned by this function; each
     // buffer outlives the call that fills it.
     unsafe {
@@ -239,7 +286,8 @@ fn get(path: &str) -> Option<Vec<u8>> {
             PCWSTR::null(),
             0,
         ))?;
-        WinHttpSetTimeouts(session.0, 5000, 5000, 5000, 8000).ok()?;
+        // The service can take several seconds to search.
+        WinHttpSetTimeouts(session.0, 8000, 8000, 8000, 15_000).ok()?;
         let connection = Handle::new(WinHttpConnect(
             session.0,
             HOST,
@@ -270,7 +318,7 @@ fn get(path: &str) -> Option<Vec<u8>> {
         )
         .ok()?;
         if status != 200 {
-            return None;
+            return Some((status, Vec::new()));
         }
         let mut body = Vec::new();
         loop {
@@ -294,7 +342,7 @@ fn get(path: &str) -> Option<Vec<u8>> {
             .ok()?;
             body.truncate(start + read as usize);
         }
-        Some(body)
+        Some((200, body))
     }
 }
 

@@ -1183,17 +1183,28 @@ impl App {
         // Only once the player has said how long the song is: without it
         // another recording's timings could be taken (and kept).
         let song = track.and_then(song_of);
-        let lines = match (&mut self.lyrics, track, &song) {
-            (Some(fetcher), Some(track), Some(song)) => fetcher
-                .get(song, track.timeline.map(|timeline| timeline.duration))
-                .flatten(),
+        // `None` while not known yet (looking, or the last look failed);
+        // `Some(None)` when the song has no synced lyrics.
+        let looked = match (&mut self.lyrics, track, &song) {
+            (Some(fetcher), Some(track), Some(song)) => {
+                fetcher.get(song, track.timeline.map(|timeline| timeline.duration))
+            }
             _ => None,
         };
+        let waiting = track.is_some() && self.lyrics.is_some() && looked.is_none();
+        let lines = looked.flatten();
         let timeline = track.and_then(|track| track.timeline);
         let (Some(lines), Some(song)) = (lines, song) else {
-            // SAFETY: Stops our own timer; harmless if it is not running.
+            // SAFETY: Re-arms or stops our own timer.
             unsafe {
-                let _ = KillTimer(Some(self.control), TIMER_LYRICS);
+                if waiting {
+                    // Ask again in a moment: a busy worker, a failed look
+                    // (no network yet, the service slow) or a length still
+                    // to come all clear up on their own.
+                    SetTimer(Some(self.control), TIMER_LYRICS, 5000, None);
+                } else {
+                    let _ = KillTimer(Some(self.control), TIMER_LYRICS);
+                }
             }
             if self.state.lyrics.take().is_some() {
                 self.mark_all_dirty();
@@ -1630,16 +1641,18 @@ impl App {
                         }
                     });
             }
-            Action::OpenTray => {
-                let mut point = POINT::default();
-                // SAFETY: Out-pointer is a valid local.
-                let _ = unsafe { GetCursorPos(&mut point) };
-                // Beside the bar, level with the button, never over the bar.
-                let left = self.pointer_screen().map_or(point.x, |i| {
-                    let screen = &self.screens[i];
-                    screen.rect.left + (screen.placements.bar_width * screen.scale).round() as i32
-                });
-                shell_launcher::toggle_hidden_icons((left, point.y));
+            Action::ShowTrayBubble => {
+                // The bubble already opens on hover; a click (or a touch)
+                // opens it too, on the screen under the pointer.
+                if let Some(i) = self.pointer_screen() {
+                    let scale = self.config.appearance.anim_scale;
+                    let screen = &mut self.screens[i];
+                    if !screen.tray.wanted {
+                        screen.tray.set(true, scale, Instant::now());
+                        screen.dirty = true;
+                        self.request_tray();
+                    }
+                }
             }
             Action::OpenNetworkSettings => open_uri("ms-settings:network"),
             Action::OpenBluetoothSettings => open_uri("ms-settings:bluetooth"),

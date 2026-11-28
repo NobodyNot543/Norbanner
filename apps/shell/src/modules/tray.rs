@@ -1,8 +1,7 @@
 //! A bubble out of the bar beside the tray button, while the pointer rests
 //! on it: the icons of the apps running in the background (those with an
 //! icon in Windows' notification area). Clicking one brings the app
-//! forward; the last cell opens Windows' own tray, where each icon's menu
-//! is (Windows lets no other program press tray icons).
+//! forward; its ✕ closes it.
 
 use norbanner_core::geom::Rect;
 
@@ -25,8 +24,7 @@ fn label_height(ctx: &Ctx) -> f32 {
 
 pub fn size(ctx: &Ctx) -> (f32, f32) {
     let t = ctx.t;
-    // The apps, plus the cell that opens Windows' tray.
-    let cells = ctx.state.tray.len() + 1;
+    let cells = ctx.state.tray.len().max(1);
     let columns = cells.clamp(1, COLUMNS);
     let rows = cells.div_ceil(COLUMNS);
     let c = cell(ctx);
@@ -101,28 +99,8 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
             }
         }
     }
-    // The last cell: Windows' own tray (menus, settings of each icon).
-    let i = apps.len();
-    let more = Rect::new(
-        area.x + (i % COLUMNS) as f32 * c,
-        area.y + (i / COLUMNS) as f32 * c,
-        c,
-        c,
-    )
-    .inset(t.padding.extra_small);
-    if ui.icon_button(
-        more,
-        icons::EXPAND_LESS,
-        t.icon.medium,
-        0.0,
-        Some(pal.surface_container_highest),
-        pal.on_surface_variant,
-        Action::OpenTray,
-    ) {
-        hovered_name = Some(crate::strings::text().tray_more.to_string());
-    }
     // The name of the app under the pointer.
-    let rows = (apps.len() + 1).div_ceil(COLUMNS) as f32;
+    let rows = apps.len().max(1).div_ceil(COLUMNS) as f32;
     let label = Rect::new(area.x, area.y + rows * c, area.w, label_h);
     let name = hovered_name.unwrap_or_else(|| crate::strings::text().tray_title.to_string());
     ui.p.text(
