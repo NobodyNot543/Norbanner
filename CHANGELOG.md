@@ -6,6 +6,25 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.36]
+
+### English
+
+- A bubble tells you when a newer Norbanner is out: once a day, while you
+  are away, Settings looks for one in the background. The bubble at the
+  bar's lower end shows the version; Install opens Settings to install it,
+  and ✕ keeps that version quiet. With automatic updates on, it installs
+  by itself as before. The shell itself still never touches the network.
+
+### Español
+
+- Un globo avisa cuando sale una versión nueva de Norbanner: una vez al
+  día, mientras no estás, Configuración la busca en segundo plano. El globo
+  en el extremo inferior de la barra muestra la versión; Instalar abre
+  Configuración para instalarla, y ✕ deja de avisar de esa versión. Con
+  las actualizaciones automáticas activadas, se instala sola como antes.
+  El shell sigue sin conectarse a la red.
+
 ## [0.1.35]
 
 ### English
