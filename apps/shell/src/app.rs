@@ -3,7 +3,7 @@
 //! everything the user can do.
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicU32, Ordering},
@@ -249,6 +249,7 @@ pub fn is_known_command(command: &str) -> bool {
             | ["lyrics", "toggle"]
             | ["workspace", _]
             | ["osd", "show"]
+            | ["update", "available", _]
     )
 }
 
@@ -388,6 +389,92 @@ fn trim_transparent(image: IconImage) -> IconImage {
     }
 }
 
+/// Norbanner's Settings app, installed beside the shell.
+fn settings_exe() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("norbanner-settings.exe")))
+        .filter(|path| path.is_file())
+}
+
+/// How long between background looks for a newer version.
+const UPDATE_EVERY: Duration = Duration::from_secs(20 * 60 * 60);
+/// How long without input counts as the user being away (an install
+/// restarts the shell).
+const UPDATE_IDLE: Duration = Duration::from_secs(5 * 60);
+
+/// What the shell remembers about updates between runs: when Settings last
+/// looked, and the version whose bubble the user closed. Kept beside
+/// `shell.json` as two lines (Unix seconds, version).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct UpdateCheck {
+    last: Option<SystemTime>,
+    dismissed: Option<String>,
+}
+
+impl UpdateCheck {
+    fn load(path: &Path) -> Self {
+        std::fs::read_to_string(path)
+            .map(|text| Self::parse(&text))
+            .unwrap_or_default()
+    }
+
+    fn parse(text: &str) -> Self {
+        let mut lines = text.lines().map(str::trim);
+        let last = lines
+            .next()
+            .and_then(|secs| secs.parse::<u64>().ok())
+            .map(|secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs));
+        let dismissed = lines
+            .next()
+            .filter(|version| !version.is_empty())
+            .map(str::to_string);
+        Self { last, dismissed }
+    }
+
+    fn text(&self) -> String {
+        let secs = self
+            .last
+            .and_then(|last| last.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map_or(0, |since| since.as_secs());
+        format!("{secs}\n{}\n", self.dismissed.as_deref().unwrap_or(""))
+    }
+
+    fn save(&self, path: &Path) {
+        if let Err(error) = std::fs::write(path, self.text()) {
+            norbanner_shell::log::line(&format!("could not save the update check: {error}"));
+        }
+    }
+
+    /// Whether it is time to look again. A clock set back counts as due.
+    fn due(&self, now: SystemTime) -> bool {
+        self.last.is_none_or(|last| match now.duration_since(last) {
+            Ok(since) => since >= UPDATE_EVERY,
+            Err(_) => true,
+        })
+    }
+}
+
+fn update_check_path(config_path: &Path) -> PathBuf {
+    config_path.with_file_name("update-check.txt")
+}
+
+/// How long since the user last touched the keyboard or mouse.
+fn idle_for() -> Duration {
+    let mut info = windows::Win32::UI::Input::KeyboardAndMouse::LASTINPUTINFO {
+        cbSize: size_of::<windows::Win32::UI::Input::KeyboardAndMouse::LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
+    // SAFETY: Out-pointer is a valid local of the size given.
+    unsafe {
+        if !windows::Win32::UI::Input::KeyboardAndMouse::GetLastInputInfo(&raw mut info).as_bool() {
+            return Duration::ZERO;
+        }
+        let now = windows::Win32::System::SystemInformation::GetTickCount();
+        Duration::from_millis(u64::from(now.wrapping_sub(info.dwTime)))
+    }
+}
+
 fn open_uri(uri: &str) {
     // SAFETY: The strings live for the call.
     unsafe {
@@ -462,6 +549,9 @@ pub struct App {
     work_tx: Sender<Work>,
     work_rx: Receiver<Work>,
     brightness_tx: Option<Sender<(isize, Option<f32>)>>,
+    /// When Settings last looked for a newer version in the background,
+    /// and the version whose bubble the user closed.
+    update_check: UpdateCheck,
     /// The screen whose window has the keyboard (launcher/session open).
     keyboard: Option<isize>,
     /// Whether media timeline updates are subscribed (only while a
@@ -571,6 +661,7 @@ impl App {
             work_tx,
             work_rx,
             brightness_tx: None,
+            update_check: UpdateCheck::load(&update_check_path(&config_path)),
             keyboard: None,
             media_progress: false,
             pending_activation: None,
@@ -1445,6 +1536,47 @@ impl App {
         }
     }
 
+    /// Settings found a newer version (and the user installs by hand): its
+    /// bubble comes out, unless the user closed this version's already.
+    fn update_available(&mut self, version: &str) {
+        let version = version.trim_start_matches('v');
+        if !self.config.general.check_updates
+            || self.update_check.dismissed.as_deref() == Some(version)
+            || self.state.update.as_deref() == Some(version)
+        {
+            return;
+        }
+        self.state.update = Some(version.to_string());
+        self.mark_all_dirty();
+    }
+
+    /// Once a day, while the user is away, starts Settings in the
+    /// background: it looks for a newer version, then installs it or tells
+    /// the shell (Settings → automatic updates). The shell itself never
+    /// touches the network.
+    fn maybe_check_for_update(&mut self) {
+        if !self.config.general.check_updates
+            || self.state.update.is_some()
+            || !self.update_check.due(SystemTime::now())
+            || idle_for() < UPDATE_IDLE
+        {
+            return;
+        }
+        let Some(settings) = settings_exe() else {
+            return;
+        };
+        // Recorded first: a failing start is not retried every minute.
+        self.update_check.last = Some(SystemTime::now());
+        self.update_check
+            .save(&update_check_path(&self.config_path));
+        if let Err(error) = std::process::Command::new(&settings)
+            .arg("--update")
+            .spawn()
+        {
+            norbanner_shell::log::line(&format!("could not look for updates: {error}"));
+        }
+    }
+
     fn show_osd(&mut self) {
         if !self.config.osd.enabled {
             return;
@@ -1677,14 +1809,24 @@ impl App {
             Action::OpenDateSettings => open_uri("ms-settings:dateandtime"),
             Action::OpenSettings => {
                 self.close_keyboard_drawers();
-                let settings = std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|dir| dir.join("norbanner-settings.exe")))
-                    .filter(|path| path.is_file());
-                match settings {
+                match settings_exe() {
                     Some(path) => open_uri(&path.display().to_string()),
                     None => open_uri(&self.config_path.display().to_string()),
                 }
+            }
+            Action::InstallUpdate => {
+                // Settings finds the same version and offers to install it.
+                self.state.update = None;
+                self.mark_all_dirty();
+                self.perform(Action::OpenSettings);
+            }
+            Action::DismissUpdate => {
+                if let Some(version) = self.state.update.take() {
+                    self.update_check.dismissed = Some(version);
+                    self.update_check
+                        .save(&update_check_path(&self.config_path));
+                }
+                self.mark_all_dirty();
             }
             Action::FocusWindow(hwnd) => shell_launcher::activate(&[hwnd]),
             Action::CloseWindow(hwnd) => shell_launcher::close(&[hwnd]),
@@ -1799,6 +1941,7 @@ impl App {
             ["quit"] => self.quit = true,
             ["reload"] => self.reload_config(),
             ["osd", "show"] => self.show_osd(),
+            ["update", "available", version] => self.update_available(version),
             ["wallpaper", "set", rest @ ..] => {
                 self.perform(Action::SetWallpaper(PathBuf::from(rest.join(" "))))
             }
@@ -2242,6 +2385,9 @@ impl App {
         if self.config.general.replace_taskbar && taskbar::needs_visibility_repair() {
             taskbar::take_over();
         }
+        if clock.second == 0 {
+            self.maybe_check_for_update();
+        }
         // Full-screen state also changes without a foreground change
         // (a video going full screen).
         let now = Instant::now();
@@ -2344,6 +2490,12 @@ impl App {
                     screen.osd.set(want, scale, now);
                     screen.dirty = true;
                 }
+            }
+            // Update bubble: out while a newer version waits.
+            let want = self.state.update.is_some();
+            if want != screen.update.wanted {
+                screen.update.set(want, scale, now);
+                screen.dirty = true;
             }
             // Background apps bubble: over the tray button or the bubble.
             {
@@ -2567,6 +2719,34 @@ mod tests {
         assert!(!is_known_command("rm -rf"));
         assert!(is_known_command("drawers close"));
         assert!(is_known_command("osd show"));
+        assert!(is_known_command("update available 0.1.36"));
+        assert!(!is_known_command("update available"));
         assert!(!is_known_command(""));
+    }
+
+    #[test]
+    fn the_update_check_survives_a_restart() {
+        let check = UpdateCheck {
+            last: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
+            dismissed: Some("0.1.36".into()),
+        };
+        assert_eq!(UpdateCheck::parse(&check.text()), check);
+        // Nothing saved yet, or a damaged file: look now, nothing closed.
+        assert_eq!(UpdateCheck::parse(""), UpdateCheck::default());
+        assert_eq!(UpdateCheck::parse("garbage"), UpdateCheck::default());
+    }
+
+    #[test]
+    fn the_update_check_comes_once_a_day() {
+        let last = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let check = UpdateCheck {
+            last: Some(last),
+            dismissed: None,
+        };
+        assert!(UpdateCheck::default().due(last));
+        assert!(!check.due(last + Duration::from_secs(60 * 60)));
+        assert!(check.due(last + UPDATE_EVERY));
+        // A clock set back does not hold the next look off.
+        assert!(check.due(last - Duration::from_secs(60)));
     }
 }

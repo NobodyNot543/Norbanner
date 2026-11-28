@@ -9,6 +9,7 @@ pub mod lyrics;
 pub mod osd;
 pub mod session;
 pub mod tray;
+pub mod update;
 pub mod window_list;
 
 use std::time::Instant;

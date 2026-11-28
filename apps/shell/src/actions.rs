@@ -59,6 +59,10 @@ pub enum Action {
     OpenPowerSettings,
     OpenDateSettings,
     OpenSettings,
+    /// Opens Settings, which installs the newer version, from its bubble.
+    InstallUpdate,
+    /// Puts the update bubble away until a newer version still.
+    DismissUpdate,
     FocusWindow(isize),
     /// Asks a window to close, as its own close button does.
     CloseWindow(isize),

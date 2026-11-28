@@ -162,6 +162,9 @@ pub struct SystemState {
     /// Brightness per HMONITOR, 0–1, for screens that support DDC/CI.
     pub brightness: HashMap<isize, f32>,
     pub started: Option<Instant>,
+    /// A newer Norbanner on GitHub (its version), until the user opens
+    /// Settings to install it or closes the bubble.
+    pub update: Option<String>,
 }
 
 /// An app in the background apps bubble.

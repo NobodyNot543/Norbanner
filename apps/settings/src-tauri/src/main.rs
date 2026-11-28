@@ -2,8 +2,9 @@
 //! open. It edits `shell.json` and tells the running shell to reload it.
 //!
 //! With `--update` it opens no window: the shell starts it that way once a
-//! day, while the user is away, to install a newer version if there is one.
-//! It exits as soon as it knows there is none.
+//! day, while the user is away, to look for a newer version. It installs it
+//! (automatic updates) or tells the shell, which shows a bubble. It exits as
+//! soon as it is done.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -386,28 +387,36 @@ async fn install_update(
 /// The argument the shell starts this app with for a background update.
 const UPDATE_ARG: &str = "--update";
 
-/// Checks for a newer version and installs it without asking, as the user
-/// chose in Settings; the installer stops and restarts the shell. Exits when
+/// Checks for a newer version. With automatic updates on, installs it
+/// without asking; the installer stops and restarts the shell. Otherwise
+/// tells the shell, whose bubble offers to install it here. Exits when
 /// there is nothing to do or anything fails: the next try is tomorrow.
 async fn update_in_background(app: AppHandle) {
     let config = get_config();
-    let allowed = config.general.check_updates && config.general.auto_update;
     let found = match app.updater_builder().timeout(Duration::from_secs(60)) {
         // The installer starts the shell again; this app need not come back.
-        builder if allowed => match builder.restart_after_install(false).build() {
-            Ok(updater) => updater.check().await.ok().flatten(),
-            Err(_) => None,
-        },
+        builder if config.general.check_updates => {
+            match builder.restart_after_install(false).build() {
+                Ok(updater) => updater.check().await.ok().flatten(),
+                Err(_) => None,
+            }
+        }
         _ => None,
     };
     // Opening Settings meanwhile lands in this process (single instance):
     // then it stays as the user's Settings, which shows the update itself,
     // and installing must not close it under them.
     let window_opened = || app.get_webview_window("main").is_some();
-    if let Some(update) = found.filter(|_| !window_opened())
-        && let Err(error) = update.download_and_install(|_, _| {}, || {}).await
-    {
-        eprintln!("norbanner-settings: actualización: {error}");
+    match found.filter(|_| !window_opened()) {
+        Some(update) if config.general.auto_update => {
+            if let Err(error) = update.download_and_install(|_, _| {}, || {}).await {
+                eprintln!("norbanner-settings: actualización: {error}");
+            }
+        }
+        Some(update) => {
+            let _ = shell_link::send(&format!("update available {}", update.version));
+        }
+        None => {}
     }
     if !window_opened() {
         app.exit(0);

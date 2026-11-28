@@ -170,7 +170,8 @@ section!(General {
     replace_taskbar: bool = true,
     /// Keep maximized windows inside the frame.
     reserve_space: bool = true,
-    /// Look for a newer version while Settings is open.
+    /// Look for a newer version while Settings is open, and once a day in
+    /// the background (the shell shows a bubble when there is one).
     check_updates: bool = true,
     /// Install updates in the background, once a day.
     auto_update: bool = false,

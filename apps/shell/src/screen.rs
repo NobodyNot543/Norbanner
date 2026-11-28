@@ -53,7 +53,7 @@ use crate::{
         osd::{self, OsdState},
         place,
         session::{self, SessionState},
-        tray, window_list,
+        tray, update, window_list,
     },
     render::{BlobScene, Gpu, Surface},
     state::SystemState,
@@ -208,6 +208,8 @@ pub struct Screen {
     pub lyrics: Drawer,
     /// The background apps bubble beside the tray button.
     pub tray: Drawer,
+    /// The bubble about a newer version, at the bar's lower end.
+    pub update: Drawer,
     /// The panel listing an app's windows, beside its tile.
     pub windows: Drawer,
     /// Which app that panel lists, and the height it opens at.
@@ -251,6 +253,7 @@ pub struct Placements {
     pub osd: Placement,
     pub lyrics: Placement,
     pub tray: Placement,
+    pub update: Placement,
     pub windows: Placement,
     /// Where each drawer would be fully open (for hover triggers).
     pub dashboard_open: Rect,
@@ -309,6 +312,7 @@ impl Screen {
             osd: Drawer::default(),
             lyrics: Drawer::default(),
             tray: Drawer::default(),
+            update: Drawer::default(),
             windows: Drawer::default(),
             window_app: None,
             dashboard_pinned: false,
@@ -391,6 +395,7 @@ impl Screen {
             self.osd.set(false, anim_scale, now);
             self.lyrics.set(false, anim_scale, now);
             self.tray.set(false, anim_scale, now);
+            self.update.set(false, anim_scale, now);
             self.windows.set(false, anim_scale, now);
         } else if self.hidden {
             // SAFETY: Shows our own window again without focusing it.
@@ -409,6 +414,7 @@ impl Screen {
             || self.osd.animating(now)
             || self.lyrics.animating(now)
             || self.tray.animating(now)
+            || self.update.animating(now)
             || self.windows.animating(now)
             || self.bar_width.animating(now)
             || self.fullscreen.animating(now)
@@ -551,6 +557,20 @@ impl Screen {
                     k,
                 )
             },
+            update: {
+                let (uw, uh) = update::size(ctx);
+                // At the bar's lower end, clear of the frame's corner.
+                place(
+                    inner,
+                    Edge::Left,
+                    inner.bottom() - radius - uh / 2.0,
+                    uw,
+                    uh,
+                    self.update.progress(now),
+                    radius,
+                    k,
+                )
+            },
             lyrics: place(
                 inner,
                 Edge::Top,
@@ -600,6 +620,7 @@ impl Screen {
             self.placements.osd,
             self.placements.lyrics,
             self.placements.tray,
+            self.placements.update,
             self.placements.windows,
         ]
         .iter()
@@ -767,6 +788,7 @@ impl Screen {
                 session::draw(ui, r, session_state)
             });
             drawer(&mut ui, &placements.osd, |ui, r| osd::draw(ui, r, monitor));
+            drawer(&mut ui, &placements.update, update::draw);
             drawer(&mut ui, &placements.tray, tray::draw);
             let window_app = window_app.as_ref().map(|(_, app)| app);
             drawer(&mut ui, &placements.windows, |ui, r| {
