@@ -6,6 +6,21 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.38]
+
+### English
+
+- Windows' volume indicator no longer flickers with keyboards whose media
+  keys Windows receives through a driver or its HID service (most
+  multimedia keyboards): 0.1.37 only took keys typed directly.
+
+### Español
+
+- El indicador de volumen de Windows ya no parpadea con teclados cuyas
+  teclas multimedia llegan a Windows a través de un controlador o de su
+  servicio HID (la mayoría de teclados multimedia): la 0.1.37 solo
+  tomaba las teclas pulsadas directamente.
+
 ## [0.1.37]
 
 ### English
