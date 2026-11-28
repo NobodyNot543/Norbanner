@@ -6,6 +6,24 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.39]
+
+### English
+
+- Windows' brightness indicator no longer flickers over the shell either:
+  instead of hiding it once it shows, Norbanner makes it fully
+  transparent, so it no longer appears at all, for brightness or volume.
+  It comes back as usual when Norbanner's sliders are off or Norbanner
+  closes.
+
+### Español
+
+- El indicador de brillo de Windows tampoco parpadea ya sobre el shell: en
+  lugar de ocultarlo cuando aparece, Norbanner lo vuelve totalmente
+  transparente, así que ya no aparece en absoluto, ni con el brillo ni
+  con el volumen. Vuelve a verse como siempre cuando los controles de
+  Norbanner están desactivados o Norbanner se cierra.
+
 ## [0.1.38]
 
 ### English
