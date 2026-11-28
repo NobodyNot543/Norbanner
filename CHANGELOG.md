@@ -6,6 +6,37 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.30]
+
+### English
+
+- The dashboard's size can be set in Settings → Panels (70–150 %).
+- Lyrics stay in time after a song change: the lookup waits until the
+  player reports the song's length, so another recording's timings are no
+  longer taken and kept.
+- Four lyrics animations, in Settings → Panels: sweep (word by word fill),
+  word (the word being sung lights up), line (whole lines slide) and fade.
+  The lyrics island can also be switched on or off there.
+- Hovering the tray button opens a bubble with the apps running in the
+  background. A click brings the app forward or opens it again; the last
+  button opens Windows' tray, where each icon's own menu is.
+
+### Español
+
+- El tamaño del panel superior se ajusta en Configuración → Paneles
+  (70–150 %).
+- La letra sigue a tiempo después de cambiar de canción: la búsqueda espera
+  a que el reproductor informe de la duración, así que ya no se toman ni se
+  guardan los tiempos de otra grabación.
+- Cuatro animaciones para la letra, en Configuración → Paneles: barrido
+  (relleno palabra por palabra), palabra (se ilumina la que se canta), verso
+  (versos enteros que suben) y fundido. Allí también se activa o desactiva
+  la isla de letras.
+- Al pasar el puntero por el botón de la bandeja se abre una burbuja con las
+  apps en segundo plano. Un clic trae la app al frente o la vuelve a abrir;
+  el último botón abre la bandeja de Windows, donde está el menú de cada
+  icono.
+
 ## [0.1.29]
 
 ### English
