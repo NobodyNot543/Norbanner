@@ -6,6 +6,33 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.37]
+
+### English
+
+- Windows' volume indicator no longer flickers over the shell: while
+  Norbanner's sliders are on, the volume keys go straight to the shell,
+  which changes the volume itself, so Windows has nothing to show. The
+  keys move by the step set in Settings (5 % unless changed).
+- Quick presses or a held volume key no longer skip steps, and changing
+  the volume unmutes, as Windows' keys do.
+- Releases are published as soon as they are built, so the in-app update
+  and the download link get them right away.
+
+### Español
+
+- El indicador de volumen de Windows ya no parpadea sobre el shell:
+  mientras los controles de Norbanner están activos, las teclas de volumen
+  van directo al shell, que cambia el volumen él mismo, y Windows no tiene
+  nada que mostrar. Las teclas avanzan el paso elegido en Configuración
+  (5 % si no se cambia).
+- Las pulsaciones rápidas o una tecla de volumen sostenida ya no se saltan
+  pasos, y cambiar el volumen quita el silencio, como las teclas de
+  Windows.
+- Las versiones se publican en cuanto se compilan, así que la
+  actualización desde la app y el enlace de descarga las reciben de
+  inmediato.
+
 ## [0.1.36]
 
 ### English
