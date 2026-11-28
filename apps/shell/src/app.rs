@@ -684,6 +684,7 @@ impl App {
         app.hooks
             .configure(&app.config.launcher.hotkey, &app.config.session.hotkey);
         crate::flyouts::set_enabled(app.config.osd.enabled);
+        hotkeys::set_volume_keys(app.config.osd.enabled && app.audio.is_some());
         if app.config.general.replace_taskbar {
             taskbar::take_over();
         }
@@ -1241,6 +1242,7 @@ impl App {
         self.hooks
             .configure(&self.config.launcher.hotkey, &self.config.session.hotkey);
         crate::flyouts::set_enabled(self.config.osd.enabled);
+        hotkeys::set_volume_keys(self.config.osd.enabled && self.audio.is_some());
         if self.config.general.replace_taskbar {
             taskbar::take_over();
         } else {
@@ -1728,7 +1730,18 @@ impl App {
                     let step = (self.config.services.audio_increment * 100.0).round() as i32;
                     let max = (self.config.services.max_volume * 100.0).round() as i32;
                     let next = (i32::from(volume.percent) + delta * step).clamp(0, max);
-                    let _ = audio.set_percent(next as u8);
+                    // Changing the level unmutes, as Windows' volume keys do.
+                    if volume.muted && delta != 0 {
+                        let _ = audio.toggle_mute();
+                    }
+                    if audio.set_percent(next as u8).is_ok()
+                        && let Some(volume) = &mut self.state.volume
+                    {
+                        // At once, not when Windows reports it: quick
+                        // presses each take a step from the last one.
+                        volume.percent = next as u8;
+                        volume.muted = false;
+                    }
                 }
                 self.show_osd();
             }
@@ -2126,6 +2139,11 @@ impl App {
             Event::SuperTap | Event::Hotkey(hotkeys::HOTKEY_LAUNCHER) => self.toggle_launcher(),
             Event::Hotkey(hotkeys::HOTKEY_SESSION) => self.toggle_session(),
             Event::Workspace(index) => desktops::go_to(index),
+            Event::VolumeKey(0) => {
+                self.perform(Action::ToggleMute);
+                self.show_osd();
+            }
+            Event::VolumeKey(step) => self.perform(Action::VolumeStep(step)),
             Event::Hotkey(_) => {}
             Event::Foreground => self.refresh_active(),
             Event::WindowsChanged => {

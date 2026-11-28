@@ -55,6 +55,8 @@ pub enum Event {
     SuperTap,
     /// Win+digit: switch to this workspace (0-based).
     Workspace(usize),
+    /// A volume key the shell took from Windows: +1, −1, or 0 for mute.
+    VolumeKey(i32),
     Hotkey(i32),
     Foreground,
     WindowsChanged,

@@ -7,6 +7,10 @@
 //! does not open Start. Every other Windows shortcut keeps working.
 //!
 //! Other shortcuts (`alt+space`, `ctrl+alt+end` …) use `RegisterHotKey`.
+//!
+//! While Norbanner's sliders are on, the volume keys go to the shell, not
+//! to Windows: Windows would show its own indicator for a frame or two
+//! before the shell could hide it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -17,7 +21,7 @@ use windows::Win32::{
             HOT_KEY_MODIFIERS, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
             KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
             RegisterHotKey, SendInput, UnregisterHotKey, VIRTUAL_KEY, VK_CAPITAL, VK_LWIN,
-            VK_NUMLOCK, VK_RWIN,
+            VK_NUMLOCK, VK_RWIN, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
         },
         WindowsAndMessaging::{
             CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLKHF_INJECTED, SetWindowsHookExW,
@@ -32,6 +36,8 @@ use crate::events::{self, Event};
 const MASK_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0xE8);
 
 static SUPER_TAP: AtomicBool = AtomicBool::new(false);
+/// The volume keys change the volume through the shell (see the top).
+static VOLUME_KEYS: AtomicBool = AtomicBool::new(false);
 static WIN_DOWN: AtomicBool = AtomicBool::new(false);
 static WIN_ALONE: AtomicBool = AtomicBool::new(false);
 /// Workspace (1-based) asked for with Win+digit, switched to once Windows
@@ -43,6 +49,21 @@ static SWALLOWED: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::n
 
 pub const HOTKEY_LAUNCHER: i32 = 1;
 pub const HOTKEY_SESSION: i32 = 2;
+
+/// Whether the shell takes the volume keys from Windows.
+pub fn set_volume_keys(enabled: bool) {
+    VOLUME_KEYS.store(enabled, Ordering::Relaxed);
+}
+
+/// The volume step a key asks for: +1, −1, or 0 for mute.
+fn volume_key(vk: VIRTUAL_KEY) -> Option<i32> {
+    match vk {
+        VK_VOLUME_UP => Some(1),
+        VK_VOLUME_DOWN => Some(-1),
+        VK_VOLUME_MUTE => Some(0),
+        _ => None,
+    }
+}
 
 pub struct Hooks {
     hook: Option<HHOOK>,
@@ -78,6 +99,15 @@ unsafe extern "system" fn keyboard(code: i32, wparam: WPARAM, lparam: LPARAM) ->
         let down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
         let up = message == WM_KEYUP || message == WM_SYSKEYUP;
         if !injected {
+            if VOLUME_KEYS.load(Ordering::Relaxed)
+                && let Some(step) = volume_key(vk)
+            {
+                // Held down, the key repeats: one step per repeat.
+                if down {
+                    events::push(Event::VolumeKey(step));
+                }
+                return LRESULT(1);
+            }
             let is_win = vk == VK_LWIN || vk == VK_RWIN;
             if is_win && down {
                 if !WIN_DOWN.swap(true, Ordering::Relaxed) {
