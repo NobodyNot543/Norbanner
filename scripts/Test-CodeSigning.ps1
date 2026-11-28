@@ -79,7 +79,7 @@ try {
     $state.missing = $true
     Assert-Rejected 'missing signer' { & $verifyScript -Mode Production -ProductionThumbprint $prodPin -Path $fixture } '*no Authenticode signature*'
     $workflow = Get-Content (Join-Path $PSScriptRoot '../.github/workflows/release.yml') -Raw
-    foreach ($name in @('Prepare release files', 'Create draft release')) {
+    foreach ($name in @('Prepare release files', 'Publish release')) {
         if ($workflow -notmatch ("- name: " + [regex]::Escape($name) + "\r?\n        if: env.SIGNING_MODE != 'Test'")) {
             throw "$name must exclude the test lane."
         }
@@ -87,7 +87,7 @@ try {
     if ($workflow -notmatch "- name: Sign the final production installer for the updater\r?\n        if: env.SIGNING_MODE == 'Production'") {
         throw 'Test lane must never generate an updater signature.'
     }
-    Write-Host 'PASS: tests cannot prepare release files, updater signatures or draft releases'
+    Write-Host 'PASS: tests cannot prepare release files, updater signatures or releases'
     # A native verification call can wait on Windows UI or certificate services.
     # Bound every step containing one, independently of SignPath approval waits.
     foreach ($entry in @(

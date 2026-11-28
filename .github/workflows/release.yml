@@ -1,9 +1,9 @@
 name: Release
 
 # Push a tag matching the workspace version (for example v0.1.0) to build the
-# signed installer and attach it to a draft release. Review the draft on GitHub
-# and publish it by hand: only published releases reach the website download
-# link and the in-app updater.
+# installer and publish it as a release once the checks and the antivirus
+# analysis pass: the website download link and the in-app updater get it at
+# once. (Signing through SignPath, when configured, still waits for approval.)
 on:
   push:
     tags: ['v*']
@@ -202,7 +202,7 @@ jobs:
         shell: pwsh
         run: |
           @'
-          SignPath test lane only. No draft release, latest.json or updater signature is produced.
+          SignPath test lane only. No release, latest.json or updater signature is produced.
           Review the verification steps and the signpath-Test artifact, including signature-report.json.
           If a signature remains invalid, send its status/message and the signing request IDs to SignPath support.
           '@ >> $env:GITHUB_STEP_SUMMARY
@@ -267,11 +267,11 @@ jobs:
           $section = if ($end) { $rest[0..($end - 2)] } else { $rest }
           $section | Set-Content -Encoding utf8NoBOM notes.md
 
-      - name: Create draft release
+      - name: Publish release
         if: env.SIGNING_MODE != 'Test'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create $env:GITHUB_REF_NAME (Get-ChildItem upload).FullName `
-            --draft --notes-file notes.md --title "Norbanner $env:GITHUB_REF_NAME"
+            --latest --notes-file notes.md --title "Norbanner $env:GITHUB_REF_NAME"

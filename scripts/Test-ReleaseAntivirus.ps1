@@ -61,9 +61,9 @@ try {
     $workflow = Get-Content (Join-Path $PSScriptRoot '../.github/workflows/release.yml') -Raw
     $scan = $workflow.IndexOf('- name: Analyze the final release files with Microsoft Defender')
     $prepare = $workflow.IndexOf('- name: Prepare release files')
-    $publish = $workflow.IndexOf('- name: Create draft release')
+    $publish = $workflow.IndexOf('- name: Publish release')
     if ($scan -lt 0 -or $scan -ge $prepare -or $prepare -ge $publish) { throw 'Scan must precede updater manifest and release creation.' }
-    Write-Host 'PASS: rejected files cannot reach updater metadata or a draft release'
+    Write-Host 'PASS: rejected files cannot reach updater metadata or a release'
 } finally {
     # Only this test's newly created absolute temp directory may be removed.
     $resolved = [IO.Path]::GetFullPath($root)
