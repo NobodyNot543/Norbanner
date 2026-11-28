@@ -6,6 +6,29 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.31]
+
+### English
+
+- The lyrics sweep no longer runs ahead of the voice: it moves through each
+  word at the song's own position, from its start to the next word's,
+  instead of filling it as soon as it starts. Lines appear 80 ms early
+  instead of 200 ms.
+- Apps in the tray bubble can be closed: hover one and press its ✕. The
+  app is asked to close first; if it is still running three seconds later
+  (tray apps often only hide), it is ended.
+
+### Español
+
+- El barrido de la letra ya no se adelanta a la voz: avanza dentro de cada
+  palabra según la posición real de la canción, desde que empieza hasta que
+  empieza la siguiente, en lugar de rellenarla en cuanto empieza. Los versos
+  aparecen 80 ms antes en lugar de 200 ms.
+- Las apps de la burbuja de la bandeja se pueden cerrar: pasa el puntero por
+  una y pulsa su ✕. Primero se le pide que se cierre; si a los tres segundos
+  sigue en marcha (las apps de la bandeja a menudo solo se esconden), se
+  finaliza.
+
 ## [0.1.30]
 
 ### English
