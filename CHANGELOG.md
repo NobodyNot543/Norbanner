@@ -6,6 +6,27 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.34]
+
+### English
+
+- Popular songs get their lyrics: the lyrics service answers a search with
+  every version of the song, often over 512 KB, and answers that large were
+  rejected as failures. They are accepted now.
+- The word sweep keeps pace with slow lines: a line is spread over most of
+  the time until the next one instead of an assumed reading speed, which
+  ran ahead of the voice.
+
+### Español
+
+- Las canciones populares ya tienen letra: el servicio de letras responde a
+  una búsqueda con todas las versiones de la canción, a menudo más de
+  512 KB, y las respuestas tan grandes se descartaban como fallos. Ahora se
+  aceptan.
+- El barrido de palabras sigue el ritmo de los versos lentos: el verso se
+  reparte en casi todo el tiempo hasta el siguiente en lugar de una
+  velocidad de lectura supuesta, que se adelantaba a la voz.
+
 ## [0.1.33]
 
 ### English
