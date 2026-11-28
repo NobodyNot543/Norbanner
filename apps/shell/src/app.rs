@@ -2713,6 +2713,8 @@ impl Drop for App {
             }
         }
         self.screens.clear();
+        // Windows' volume and brightness indicator, visible again.
+        crate::flyouts::restore();
         // Work area first: giving the taskbar back then lets Explorer
         // reserve the taskbar's strip itself.
         workarea::restore_all();

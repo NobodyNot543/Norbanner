@@ -5,34 +5,57 @@
 //! window (`XamlExplorerHostIslandWindow`) with no title, centred near the
 //! bottom (or top) of the screen. Every other island of that class has a
 //! title (Alt+Tab is "Task switching") or is larger, or sits in the middle
-//! of the screen (the virtual desktop name). The shell's window-event hook
-//! sees it appear and hides it before it has been on screen long; Explorer
-//! shows it again for the next change, and it is hidden again.
+//! of the screen (the virtual desktop name).
+//!
+//! Hiding it once shown always leaves it on screen for a frame or two (a
+//! flicker), so the shell also makes it fully transparent: Explorer keeps
+//! the same window and shows it again for every change, still transparent,
+//! so from then on nothing appears at all. It is made transparent as soon
+//! as the shell finds it (at start, or the first time it shows), and given
+//! back as it was when the sliders are turned off or the shell exits. It is
+//! still hidden each time, so the invisible window never takes clicks.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use windows::{
     Win32::{
-        Foundation::{HWND, RECT},
+        Foundation::{COLORREF, HWND, LPARAM, RECT},
         Graphics::Gdi::{
             GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
         },
         UI::{
             HiDpi::GetDpiForWindow,
             WindowsAndMessaging::{
-                FindWindowW, GetClassNameW, GetWindowRect, GetWindowTextLengthW,
-                GetWindowThreadProcessId, SW_HIDE, ShowWindowAsync,
+                EnumWindows, FindWindowW, GWL_EXSTYLE, GetClassNameW, GetWindowLongPtrW,
+                GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId, IsWindow, LWA_ALPHA,
+                SW_HIDE, SetLayeredWindowAttributes, SetWindowLongPtrW, ShowWindowAsync,
+                WS_EX_LAYERED,
             },
         },
     },
-    core::{PCWSTR, w},
+    core::{BOOL, PCWSTR, w},
 };
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// The indicator made transparent, and whether it was layered before.
+static VANISHED: Mutex<Option<(isize, bool)>> = Mutex::new(None);
+
 /// Whether Windows' indicator is hidden (while Norbanner's sliders are on).
+/// On, an indicator already there is made transparent now; off, it is
+/// given back as it was.
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
+    if enabled {
+        if let Some(hwnd) = find_indicator() {
+            vanish(hwnd);
+        }
+    } else {
+        restore();
+    }
 }
 
 /// Hides `hwnd` if it is Windows' volume or brightness indicator, just
@@ -41,8 +64,93 @@ pub fn hide_if_indicator(hwnd: HWND) -> bool {
     if !ENABLED.load(Ordering::Relaxed) || !is_indicator(hwnd) {
         return false;
     }
+    // Transparent from now on: its next appearances show nothing at all.
+    vanish(hwnd);
     // SAFETY: Asks another process's window to hide without waiting for it.
     unsafe { ShowWindowAsync(hwnd, SW_HIDE) }.as_bool()
+}
+
+/// Gives the indicator back as it was (the shell is exiting).
+pub fn restore() {
+    let Ok(mut vanished) = VANISHED.lock() else {
+        return;
+    };
+    let Some((raw, was_layered)) = vanished.take() else {
+        return;
+    };
+    let hwnd = HWND(raw as *mut _);
+    // SAFETY: Style changes on another process's window, checked to still
+    // exist; opaque again before the layered style is removed.
+    unsafe {
+        if !IsWindow(Some(hwnd)).as_bool() {
+            return;
+        }
+        let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+        if !was_layered {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED.0 as isize));
+        }
+    }
+}
+
+/// Makes the indicator opaque again without knowing what the shell did to
+/// it: for the watchdog, after the shell has gone (Explorer's own indicator
+/// is not layered).
+pub fn give_back() {
+    let Some(hwnd) = find_indicator() else {
+        return;
+    };
+    // SAFETY: Style changes on another process's window, found just now.
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if ex & WS_EX_LAYERED.0 as isize != 0 {
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED.0 as isize));
+        }
+    }
+}
+
+/// Makes `hwnd` (the indicator) fully transparent, once.
+fn vanish(hwnd: HWND) {
+    let Ok(mut vanished) = VANISHED.lock() else {
+        return;
+    };
+    if vanished.is_some_and(|(raw, _)| raw == hwnd.0 as isize) {
+        return;
+    }
+    // A new indicator (Explorer restarted): the old one is gone.
+    // SAFETY: Style changes on another process's window; a layered window
+    // at alpha 0 draws nothing, its XAML content included.
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let was_layered = ex & WS_EX_LAYERED.0 as isize != 0;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED.0 as isize);
+        if SetLayeredWindowAttributes(hwnd, COLORREF(0), 0, LWA_ALPHA).is_ok() {
+            *vanished = Some((hwnd.0 as isize, was_layered));
+        } else if !was_layered {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        }
+    }
+}
+
+/// The indicator, if Explorer has made it already (it stays, hidden,
+/// between changes).
+fn find_indicator() -> Option<HWND> {
+    unsafe extern "system" fn each(hwnd: HWND, data: LPARAM) -> BOOL {
+        // SAFETY: `data` is the Option below, alive for the enumeration.
+        let found = unsafe { &mut *(data.0 as *mut Option<HWND>) };
+        if is_indicator(hwnd) {
+            *found = Some(hwnd);
+            return BOOL(0);
+        }
+        BOOL(1)
+    }
+    let mut found: Option<HWND> = None;
+    // SAFETY: The callback only writes to `found`, which outlives the call.
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&raw mut found as isize));
+    }
+    found
 }
 
 fn is_indicator(hwnd: HWND) -> bool {

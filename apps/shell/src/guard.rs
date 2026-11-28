@@ -293,6 +293,8 @@ fn restore_desktop() {
     // Work area first, so Explorer then reserves the taskbar's own strip.
     workarea::restore_all();
     taskbar::give_back_on_exit();
+    // Windows' volume and brightness indicator, visible again.
+    crate::flyouts::give_back();
 }
 
 #[cfg(test)]
