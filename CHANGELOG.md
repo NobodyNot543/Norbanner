@@ -6,6 +6,38 @@ copies the section of the version being published into the GitHub release.
 Cada versión lista sus cambios en inglés y en español. El flujo de publicación
 copia la sección de la versión que se publica a la release de GitHub.
 
+## [0.1.35]
+
+### English
+
+- Windows' own volume and brightness indicator no longer pops up over the
+  shell: while Norbanner's sliders are on, they show the level instead,
+  brightness keys included.
+- The lyrics and the song's progress no longer jump when pausing or
+  resuming Spotify (and other players that report their position only on
+  a seek, play or pause).
+- Lyrics prefer the version timed on the very recording that plays: one as
+  long as the song wins over versions a few seconds off, which may have a
+  different intro.
+- Dark themes outline the frame and the drawers with a thin line, so they
+  stand out from dark windows and wallpapers.
+- With several screens, each one's brightness is read again correctly.
+
+### Español
+
+- El indicador de volumen y brillo de Windows ya no aparece sobre el shell:
+  mientras los controles de Norbanner están activos, ellos muestran el
+  nivel, también con las teclas de brillo.
+- La letra y el progreso de la canción ya no saltan al pausar o reanudar
+  Spotify (y otros reproductores que solo informan su posición al saltar,
+  reproducir o pausar).
+- La letra prefiere la versión sincronizada con la grabación que suena: una
+  que dura lo mismo que la canción gana a versiones unos segundos más
+  largas o cortas, que pueden tener otra introducción.
+- Los temas oscuros dibujan una línea fina en el borde del marco y los
+  cajones, para que se distingan de ventanas y fondos oscuros.
+- Con varias pantallas, el brillo de cada una se vuelve a leer bien.
+
 ## [0.1.34]
 
 ### English
