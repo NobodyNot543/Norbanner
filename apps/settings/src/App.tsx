@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   checkUpdate, defaultConfig, forgetWallpaperPreview, getAutostart, installUpdate, loadConfig, loadWallpaperPreview, logoPreview, merge,
   openReleaseNotes, openRepository, pickLogo, saveConfig, schemePreview, setAutostart,
-  VARIANTS, type Config, type Palette, type Patch, type UpdateInfo,
+  LYRICS_ANIMATIONS, VARIANTS, type Config, type LyricsAnimation, type Palette, type Patch, type UpdateInfo,
 } from "./config";
 import { Card, ColourInput, ListEditor, Row, Segmented, Select, Slider, Stepper, SubRow, Toggle } from "./controls";
 import { LANGUAGE_OPTIONS, resolveLanguage, textsFor, type Texts } from "./i18n";
@@ -52,6 +52,10 @@ function isLightPalette(palette: Palette | null): boolean {
   if (!hex || hex.length !== 6) return false;
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
+}
+
+function lyricsAnimationLabel(t: Texts, value: LyricsAnimation): string {
+  return { sweep: t.lyricsSweep, word: t.lyricsWord, line: t.lyricsLine, fade: t.lyricsFade }[value];
 }
 
 const HOTKEYS = ["super", "alt+space", "ctrl+space", "none"] as const;
@@ -319,6 +323,20 @@ export function App() {
         <SubRow open={config.dashboard.enabled} label={t.showOnHover}>
           <Toggle label={t.showOnHover} checked={config.dashboard.showOnHover}
             onChange={(showOnHover) => change({ dashboard: { showOnHover } })} />
+        </SubRow>
+        <SubRow open={config.dashboard.enabled} label={t.dashboardSize}>
+          <Slider label={t.dashboardSize} unit="%" min={70} max={150}
+            value={Math.round((config.dashboard.scale ?? 1) * 100)}
+            onChange={(v) => change({ dashboard: { scale: v / 100 } })} />
+        </SubRow>
+        <Row label={t.lyricsIsland} hint={t.lyricsIslandHint}>
+          <Toggle label={t.lyricsIsland} checked={config.dashboard.lyrics ?? false}
+            onChange={(lyrics) => change({ dashboard: { lyrics } })} />
+        </Row>
+        <SubRow open={config.dashboard.lyrics ?? false} label={t.lyricsAnimation}>
+          <Select label={t.lyricsAnimation} value={config.dashboard.lyricsAnimation ?? "sweep"}
+            options={LYRICS_ANIMATIONS.map((value) => ({ value, label: lyricsAnimationLabel(t, value) }))}
+            onChange={(lyricsAnimation) => change({ dashboard: { lyricsAnimation } })} />
         </SubRow>
       </Card>
       <Card title={t.launcher}>

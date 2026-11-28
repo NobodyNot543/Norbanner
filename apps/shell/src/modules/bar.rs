@@ -26,6 +26,8 @@ pub struct BarState {
     selector_shown: bool,
     /// The current workspace's app tiles last frame, for the windows panel.
     pub app_tiles: Vec<(Rect, crate::state::DesktopApp)>,
+    /// The tray button last frame, for the background apps bubble.
+    pub tray: Option<Rect>,
 }
 
 impl Default for BarState {
@@ -34,6 +36,7 @@ impl Default for BarState {
             selector: Anim::new(0.0),
             selector_shown: false,
             app_tiles: Vec::new(),
+            tray: None,
         }
     }
 }
@@ -212,6 +215,7 @@ pub fn draw(ui: &mut Ui, bar: Rect, state: &mut BarState, monitor: isize) {
     }
 
     state.app_tiles.clear();
+    state.tray = None;
     let mut y = bar.y + v_padding;
     for (entry, height) in entries.iter().zip(&heights) {
         if height.is_some_and(|h| h <= 0.0) {
@@ -228,7 +232,10 @@ pub fn draw(ui: &mut Ui, bar: Rect, state: &mut BarState, monitor: isize) {
             Entry::Workspaces => workspaces(ui, rect, state, fit),
             Entry::Spacer => {}
             Entry::ActiveWindow => active_window(ui, rect),
-            Entry::Tray => tray(ui, rect),
+            Entry::Tray => {
+                state.tray = Some(rect);
+                tray(ui, rect);
+            }
             Entry::Clock => clock(ui, rect, fit),
             Entry::StatusIcons => status_icons(ui, rect),
             Entry::Power => power_button(ui, rect),

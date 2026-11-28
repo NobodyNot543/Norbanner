@@ -53,7 +53,7 @@ use crate::{
         osd::{self, OsdState},
         place,
         session::{self, SessionState},
-        window_list,
+        tray, window_list,
     },
     render::{BlobScene, Gpu, Surface},
     state::SystemState,
@@ -206,6 +206,8 @@ pub struct Screen {
     pub osd: Drawer,
     /// The small lyrics island at the top.
     pub lyrics: Drawer,
+    /// The background apps bubble beside the tray button.
+    pub tray: Drawer,
     /// The panel listing an app's windows, beside its tile.
     pub windows: Drawer,
     /// Which app that panel lists, and the height it opens at.
@@ -248,6 +250,7 @@ pub struct Placements {
     pub session: Placement,
     pub osd: Placement,
     pub lyrics: Placement,
+    pub tray: Placement,
     pub windows: Placement,
     /// Where each drawer would be fully open (for hover triggers).
     pub dashboard_open: Rect,
@@ -305,6 +308,7 @@ impl Screen {
             session: Drawer::default(),
             osd: Drawer::default(),
             lyrics: Drawer::default(),
+            tray: Drawer::default(),
             windows: Drawer::default(),
             window_app: None,
             dashboard_pinned: false,
@@ -386,6 +390,7 @@ impl Screen {
             self.session.set(false, anim_scale, now);
             self.osd.set(false, anim_scale, now);
             self.lyrics.set(false, anim_scale, now);
+            self.tray.set(false, anim_scale, now);
             self.windows.set(false, anim_scale, now);
         } else if self.hidden {
             // SAFETY: Shows our own window again without focusing it.
@@ -403,6 +408,7 @@ impl Screen {
             || self.session.animating(now)
             || self.osd.animating(now)
             || self.lyrics.animating(now)
+            || self.tray.animating(now)
             || self.windows.animating(now)
             || self.bar_width.animating(now)
             || self.fullscreen.animating(now)
@@ -488,7 +494,12 @@ impl Screen {
         let radius = t.rounding.extra_large;
         let k = config.border.smoothing;
 
-        let (dw, dh) = dashboard::size(ctx);
+        // The dashboard has its own size (Settings → Panels).
+        let dash_tokens = Tokens::for_dashboard(config, self.scale);
+        let (dw, dh) = dashboard::size(&Ctx {
+            t: &dash_tokens,
+            ..*ctx
+        });
         let (lw, lh) = launcher::size(ctx, launcher_state);
         let (sw, sh) = session::size(ctx);
         let (ow, oh) = osd::size(ctx, self.monitor);
@@ -526,6 +537,20 @@ impl Screen {
                 k,
             ),
             session: session_place,
+            tray: {
+                let (tw, th) = tray::size(ctx);
+                let along = self.bar_state.tray.map_or(center_y, |r| r.center().1);
+                place(
+                    inner,
+                    Edge::Left,
+                    along,
+                    tw,
+                    th,
+                    self.tray.progress(now),
+                    radius,
+                    k,
+                )
+            },
             lyrics: place(
                 inner,
                 Edge::Top,
@@ -574,6 +599,7 @@ impl Screen {
             self.placements.session,
             self.placements.osd,
             self.placements.lyrics,
+            self.placements.tray,
             self.placements.windows,
         ]
         .iter()
@@ -666,6 +692,7 @@ impl Screen {
             tint: 0.6,
         };
         let placements = self.placements;
+        let dash_tokens = Tokens::for_dashboard(config, self.scale);
         let pointer = self.pointer;
         let pressed = self.pressed.is_some() || self.drag.is_some();
         let mut hits = Vec::new();
@@ -707,7 +734,20 @@ impl Screen {
             }
             drawer(&mut ui, &placements.lyrics, lyrics::draw);
             drawer(&mut ui, &placements.dashboard, |ui, r| {
-                dashboard::draw(ui, r, dash_state)
+                // Drawn with the dashboard's own size.
+                let mut dash = Ui {
+                    p: &mut *ui.p,
+                    pal: ui.pal,
+                    t: &dash_tokens,
+                    config: ui.config,
+                    state: ui.state,
+                    hits: &mut *ui.hits,
+                    pointer: ui.pointer,
+                    pressed: ui.pressed,
+                    now: ui.now,
+                    layer: ui.layer,
+                };
+                dashboard::draw(&mut dash, r, dash_state);
             });
             if let Some(blob) = placements.launcher.blob {
                 launcher::backdrop(&mut ui, blob, placements.launcher.content);
@@ -719,6 +759,7 @@ impl Screen {
                 session::draw(ui, r, session_state)
             });
             drawer(&mut ui, &placements.osd, |ui, r| osd::draw(ui, r, monitor));
+            drawer(&mut ui, &placements.tray, tray::draw);
             let window_app = window_app.as_ref().map(|(_, app)| app);
             drawer(&mut ui, &placements.windows, |ui, r| {
                 window_list::draw(ui, r, window_app);

@@ -143,6 +143,8 @@ pub struct SystemState {
     pub desktop_apps: Vec<Vec<DesktopApp>>,
     pub active: Option<ActiveWindow>,
     pub media: Option<Track>,
+    /// Apps running in the background with a tray icon, for the bubble.
+    pub tray: Vec<TrayEntry>,
     /// Pictures of windows for the windows panel: the image cache key and
     /// the picture, per window handle.
     pub previews: HashMap<isize, (u64, Arc<IconImage>)>,
@@ -160,6 +162,17 @@ pub struct SystemState {
     /// Brightness per HMONITOR, 0–1, for screens that support DDC/CI.
     pub brightness: HashMap<isize, f32>,
     pub started: Option<Instant>,
+}
+
+/// An app in the background apps bubble.
+#[derive(Clone)]
+pub struct TrayEntry {
+    /// The running program, opened again on a click.
+    pub path: String,
+    pub name: String,
+    /// Image cache key of its icon.
+    pub key: u64,
+    pub icon: Option<Arc<IconImage>>,
 }
 
 /// The lyrics island's content: the song's lines, the one being sung and

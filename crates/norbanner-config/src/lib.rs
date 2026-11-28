@@ -259,6 +259,12 @@ section!(
         /// A small island at the top shows the playing song's synced lyrics.
         /// Off by default: it looks the song up on lrclib.net.
         lyrics: bool = false,
+        /// How the lyrics move: `sweep` (colour fills word by word), `word`
+        /// (the word being sung stands out), `line` (whole lines slide in)
+        /// or `fade` (lines fade into each other).
+        lyrics_animation: String = "sweep".into(),
+        /// Size of the dashboard, 1 = normal.
+        scale: f32 = 1.0,
     }
 );
 
@@ -351,6 +357,13 @@ impl Config {
         a.transparency.layers = a.transparency.layers.clamp(0.0, 1.0);
         self.bar.workspaces.shown = self.bar.workspaces.shown.clamp(1, 20);
         self.launcher.max_shown = self.launcher.max_shown.clamp(1, 20);
+        self.dashboard.scale = self.dashboard.scale.clamp(0.7, 1.5);
+        if !matches!(
+            self.dashboard.lyrics_animation.as_str(),
+            "sweep" | "word" | "line" | "fade"
+        ) {
+            self.dashboard.lyrics_animation = "sweep".into();
+        }
         let s = &mut self.services;
         s.max_volume = s.max_volume.clamp(0.1, 1.0);
         s.audio_increment = s.audio_increment.clamp(0.01, 0.5);
@@ -532,9 +545,13 @@ mod tests {
         let mut config = Config::default();
         config.border.thickness = 500.0;
         config.appearance.anim_scale = -1.0;
+        config.dashboard.scale = 9.0;
+        config.dashboard.lyrics_animation = "spin".into();
         let config = config.sanitized();
         assert_eq!(config.border.thickness, 60.0);
         assert_eq!(config.appearance.anim_scale, 0.0);
+        assert_eq!(config.dashboard.scale, 1.5);
+        assert_eq!(config.dashboard.lyrics_animation, "sweep");
     }
 
     #[test]

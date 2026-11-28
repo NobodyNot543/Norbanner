@@ -86,6 +86,12 @@ impl Tokens {
         Self::with_density(config, density(scale))
     }
 
+    /// The dashboard's tokens: the screen's, times the user's size for it.
+    #[must_use]
+    pub fn for_dashboard(config: &Config, scale: f32) -> Self {
+        Self::with_density(config, density(scale) * config.dashboard.scale)
+    }
+
     #[must_use]
     pub fn with_density(config: &Config, d: f32) -> Self {
         let a = &config.appearance;

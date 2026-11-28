@@ -9,6 +9,9 @@ export const VARIANTS = [
 ] as const;
 export type VariantId = typeof VARIANTS[number];
 
+export const LYRICS_ANIMATIONS = ["sweep", "word", "line", "fade"] as const;
+export type LyricsAnimation = typeof LYRICS_ANIMATIONS[number];
+
 export interface Entry { id: string; enabled: boolean }
 export interface Scale { scale: number }
 
@@ -45,7 +48,11 @@ export interface Config {
     scrollActions: { workspaces: boolean; volume: boolean; brightness: boolean };
     popouts: { activeWindow: boolean; tray: boolean; statusIcons: boolean };
   };
-  dashboard: { enabled: boolean; showOnHover: boolean; dragThreshold: number; resourceUpdateInterval: number };
+  dashboard: {
+    enabled: boolean; showOnHover: boolean; dragThreshold: number; resourceUpdateInterval: number;
+    /** The lyrics island, how its lyrics move, and the dashboard's size (1 = normal). */
+    lyrics: boolean; lyricsAnimation: LyricsAnimation; scale: number;
+  };
   launcher: {
     enabled: boolean; showOnHover: boolean; dragThreshold: number; maxShown: number;
     actionPrefix: string; hotkey: string; enableCalculator: boolean;

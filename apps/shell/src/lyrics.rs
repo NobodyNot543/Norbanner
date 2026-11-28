@@ -42,6 +42,10 @@ pub struct Song {
     pub artist: String,
     /// Helps choose between versions of the song.
     pub album: String,
+    /// The recording's length in whole seconds. Part of the key: right
+    /// after a song change a player can report the new title with the old
+    /// song's length, and that lookup must not stand in for the real one.
+    pub seconds: u64,
 }
 
 /// The lyrics of a song: `None` when it has no synced lyrics.

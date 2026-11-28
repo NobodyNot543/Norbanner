@@ -123,6 +123,8 @@ enum Work {
     Backdrop(IconImage),
     /// Pictures of windows for the windows panel.
     Previews(Vec<(isize, Option<IconImage>)>),
+    /// The apps running in the background, for the tray bubble.
+    Tray(Vec<norbanner_shell::tray_apps::TrayApp>),
     Brightness(isize, f32),
 }
 
@@ -240,6 +242,18 @@ pub fn is_known_command(command: &str) -> bool {
             | ["workspace", _]
             | ["osd", "show"]
     )
+}
+
+/// What identifies a song for its lyrics; `None` until the player has
+/// reported its length.
+fn song_of(track: &media::Track) -> Option<crate::lyrics::Song> {
+    let length = track.timeline?.duration;
+    Some(crate::lyrics::Song {
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        seconds: length.as_secs(),
+    })
 }
 
 fn monitors() -> Vec<(isize, RECT, f32)> {
@@ -1003,6 +1017,26 @@ impl App {
         });
     }
 
+    /// Finds the apps running in the background, off the UI thread.
+    fn request_tray(&self) {
+        let tx = self.work_tx.clone();
+        let control = self.control.0 as isize;
+        let _ = thread::Builder::new().name("tray".into()).spawn(move || {
+            // SAFETY: COM for this worker thread only (icons decode with WIC).
+            let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+            let _ = tx.send(Work::Tray(norbanner_shell::tray_apps::running()));
+            // SAFETY: As in `start_workers`.
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    Some(HWND(control as *mut _)),
+                    WM_WORKER,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        });
+    }
+
     /// Takes pictures of `windows` for the windows panel, off the UI thread.
     fn request_previews(&self, windows: Vec<isize>) {
         let tx = self.work_tx.clone();
@@ -1145,11 +1179,9 @@ impl App {
             .media
             .as_ref()
             .filter(|_| self.config.dashboard.lyrics);
-        let song = track.map(|track| crate::lyrics::Song {
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: track.album.clone(),
-        });
+        // Only once the player has said how long the song is: without it
+        // another recording's timings could be taken (and kept).
+        let song = track.and_then(song_of);
         let lines = match (&mut self.lyrics, track, &song) {
             (Some(fetcher), Some(track), Some(song)) => fetcher
                 .get(song, track.timeline.map(|timeline| timeline.duration))
@@ -1178,9 +1210,15 @@ impl App {
         });
         let current =
             position.and_then(|position| norbanner_core::lyrics::index_at(&lines, position));
-        let words = current.zip(position).map_or(0, |(i, position)| {
-            norbanner_core::lyrics::words_at(&lines[i], position)
-        });
+        // Whole-line animations need no word steps (and no wake-ups for them).
+        let by_word =
+            crate::modules::lyrics::Mode::from(&self.config.dashboard.lyrics_animation).by_word();
+        let words = current
+            .zip(position)
+            .filter(|_| by_word)
+            .map_or(0, |(i, position)| {
+                norbanner_core::lyrics::words_at(&lines[i], position)
+            });
         let mut dirty = false;
         match &mut self.state.lyrics {
             Some(view) if Arc::ptr_eq(&view.lines, &lines) => {
@@ -1226,8 +1264,14 @@ impl App {
             .filter(|timeline| timeline.advancing(now))
             .zip(position)
             .and_then(|(_, position)| {
-                norbanner_core::lyrics::next_change(&lines, position)
-                    .map(|next| next.saturating_sub(position))
+                let next = if by_word {
+                    norbanner_core::lyrics::next_change(&lines, position)
+                } else {
+                    lines
+                        .get(lines.partition_point(|line| line.at <= position))
+                        .map(|line| line.at)
+                };
+                next.map(|next| next.saturating_sub(position))
             });
         // SAFETY: (Re)arms or stops a timer on our own window.
         unsafe {
@@ -1504,10 +1548,8 @@ impl App {
             }
             Action::LyricsOffset(step) => {
                 if let Some(track) = &self.state.media {
-                    let song = crate::lyrics::Song {
-                        title: track.title.clone(),
-                        artist: track.artist.clone(),
-                        album: track.album.clone(),
+                    let Some(song) = song_of(track) else {
+                        return;
                     };
                     let offset = self.lyrics_offsets.entry(song).or_insert(0);
                     *offset = (*offset + step * 250).clamp(-10_000, 10_000);
@@ -1536,6 +1578,31 @@ impl App {
                     self.set_brightness(monitor, value + delta as f32 * step);
                 }
                 self.show_osd();
+            }
+            Action::OpenTrayApp(path) => {
+                // Its window if it has one open; otherwise open the program
+                // again, which brings most tray apps back.
+                let window = self
+                    .state
+                    .desktop_apps
+                    .iter()
+                    .flatten()
+                    .find(|app| app.app_id.eq_ignore_ascii_case(&path))
+                    .and_then(|app| app.windows.first().copied());
+                match window {
+                    Some(hwnd) => self.perform(Action::FocusWindow(hwnd)),
+                    None => {
+                        if let Err(error) = shell_launcher::open(&path) {
+                            norbanner_shell::log::line(&format!("could not open {path}: {error}"));
+                        }
+                    }
+                }
+                for screen in &mut self.screens {
+                    screen
+                        .tray
+                        .set(false, self.config.appearance.anim_scale, Instant::now());
+                }
+                self.mark_all_dirty();
             }
             Action::OpenTray => {
                 let mut point = POINT::default();
@@ -2039,6 +2106,22 @@ impl App {
                     }
                     self.mark_all_dirty();
                 }
+                Work::Tray(apps) => {
+                    self.state.tray = apps
+                        .into_iter()
+                        .map(|app| crate::state::TrayEntry {
+                            key: crate::state::image_key(&format!(
+                                "tray:{}:{}",
+                                app.path,
+                                app.icon.as_ref().map_or(0, |i| i.bgra.len())
+                            )),
+                            path: app.path,
+                            name: app.name,
+                            icon: app.icon.map(Arc::new),
+                        })
+                        .collect();
+                    self.mark_all_dirty();
+                }
                 Work::Brightness(monitor, value) => {
                     self.state.brightness.insert(monitor, value);
                 }
@@ -2140,6 +2223,7 @@ impl App {
         let scale = config.appearance.anim_scale;
         let rounding = config.border.rounding;
         let mut wanted_previews: Option<Vec<isize>> = None;
+        let mut wanted_tray = false;
         for screen in &mut self.screens {
             let t = Tokens::for_scale(config, screen.scale);
             let full_bar = bar::width(t.bar_inner, config.border.thickness, t.padding.small);
@@ -2194,6 +2278,25 @@ impl App {
                 if want != screen.osd.wanted {
                     screen.osd.set(want, scale, now);
                     screen.dirty = true;
+                }
+            }
+            // Background apps bubble: over the tray button or the bubble.
+            {
+                let button = screen.bar_state.tray;
+                let bubble = p.tray.content;
+                let over_button =
+                    button.is_some_and(|r| pointer.is_some_and(|(x, y)| r.contains(x, y)));
+                let over_bubble = screen.tray.wanted
+                    && pointer.is_some_and(|(x, y)| {
+                        x <= bubble.right() && y >= bubble.y && y <= bubble.bottom()
+                    });
+                let want = over_button || over_bubble;
+                if want != screen.tray.wanted {
+                    screen.tray.set(want, scale, now);
+                    screen.dirty = true;
+                    if want {
+                        wanted_tray = true;
+                    }
                 }
             }
             // Windows panel: over an app tile (which one it lists follows
@@ -2253,6 +2356,9 @@ impl App {
         }
         if let Some(windows) = wanted_previews {
             self.request_previews(windows);
+        }
+        if wanted_tray {
+            self.request_tray();
         }
     }
 

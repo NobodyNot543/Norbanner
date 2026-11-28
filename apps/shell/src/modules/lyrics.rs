@@ -28,6 +28,36 @@ const WORD: Duration = Duration::from_millis(180);
 /// How long a timing correction stays on the island after a scroll.
 const OFFSET_SHOWN: Duration = Duration::from_millis(1600);
 
+/// How the lyrics move (Settings → Panels).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// The accent colour fills the line word by word.
+    Sweep,
+    /// The word being sung lights up.
+    Word,
+    /// Whole lines, sliding up.
+    Line,
+    /// Whole lines, fading into each other.
+    Fade,
+}
+
+impl Mode {
+    pub fn from(name: &str) -> Self {
+        match name {
+            "word" => Self::Word,
+            "line" => Self::Line,
+            "fade" => Self::Fade,
+            _ => Self::Sweep,
+        }
+    }
+
+    /// Whether words are followed (the shell then wakes for each word, not
+    /// only for each line).
+    pub fn by_word(self) -> bool {
+        matches!(self, Self::Sweep | Self::Word)
+    }
+}
+
 /// The song's title and artist, small, above the line.
 fn header_height(t: &crate::tokens::Tokens) -> f32 {
     t.font.small * 1.5
@@ -140,7 +170,13 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
     let now = ui.now;
     let line_p = Curve::EmphasizedDecel.ease(progress(view.changed, LINE, scale, now));
     let word_p = Curve::StandardDecel.ease(progress(view.word_changed, WORD, scale, now));
-    let rise = inner.h * 0.8;
+    let mode = Mode::from(ui.config.dashboard.lyrics_animation.as_str());
+    // Fade swaps lines in place; the others slide them up.
+    let rise = if mode == Mode::Fade {
+        0.0
+    } else {
+        inner.h * 0.8
+    };
     let before = ui.p.opacity;
     // `sung` is how many words are filled, and how many were before the
     // sweep started (it moves from one to the other).
@@ -167,6 +203,10 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
             let (width, _) = ui.p.measure(&line.text, style);
             let (cx, _) = inner.center();
             let r = Rect::new(cx - width / 2.0, inner.y + offset, width + 4.0, inner.h);
+            if !mode.by_word() {
+                ui.p.text(&line.text, r, style, pal.primary);
+                return;
+            }
             ui.p.text(
                 &line.text,
                 r,
@@ -180,6 +220,27 @@ pub fn draw(ui: &mut Ui, rect: Rect) {
                 }
             };
             let (to, from) = sung;
+            if mode == Mode::Word {
+                // Words already sung settle to the text colour; the one
+                // being sung lights up in the accent.
+                let done = reach(ui, to.saturating_sub(1));
+                let end = reach(ui, to);
+                if done > 0.5 {
+                    ui.p.clip(Rect::new(r.x - 2.0, r.y, done + 2.0, r.h));
+                    ui.p.text(&line.text, r, style, pal.on_surface);
+                    ui.p.unclip();
+                }
+                if end > done {
+                    let lit = if to == from { 1.0 } else { word_p };
+                    let saved = ui.p.opacity;
+                    ui.p.opacity = saved * lit;
+                    ui.p.clip(Rect::new(r.x + done, r.y, end - done + 2.0, r.h));
+                    ui.p.text(&line.text, r, style, pal.primary);
+                    ui.p.unclip();
+                    ui.p.opacity = saved;
+                }
+                return;
+            }
             let fill = if to == from {
                 reach(ui, to)
             } else {

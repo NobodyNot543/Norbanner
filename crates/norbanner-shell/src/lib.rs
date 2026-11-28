@@ -22,6 +22,7 @@ pub mod sysinfo;
 pub mod system;
 pub mod taskbar;
 pub mod tracker;
+pub mod tray_apps;
 pub mod updates;
 pub mod user;
 pub mod userassist;
