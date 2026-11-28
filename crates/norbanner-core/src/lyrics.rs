@@ -220,6 +220,95 @@ pub fn next_change(lines: &[Line], position: Duration) -> Option<Duration> {
     }
 }
 
+/// Words players add to a title that lyric services do not have, inside
+/// brackets: `(Official Video)`, `[Lyrics]`, `(Remastered 2011)`…
+const TITLE_NOISE: &[&str] = &[
+    "official",
+    "video",
+    "audio",
+    "lyric",
+    "letra",
+    "visualizer",
+    "visualiser",
+    "remaster",
+    "explicit",
+    "clean",
+    "hd",
+    "4k",
+    "mv",
+    "feat",
+    "ft.",
+    "with ",
+    "prod",
+];
+
+/// The title as a lyric service would have it: bracketed additions that
+/// name a video, a remaster or guests are dropped, and so is a leading
+/// "Artist - " (music video titles).
+#[must_use]
+pub fn clean_title(title: &str, artist: &str) -> String {
+    let mut out = String::with_capacity(title.len());
+    let mut rest = title;
+    while let Some(open) = rest.find(['(', '[']) {
+        let close = if rest[open..].starts_with('(') {
+            ')'
+        } else {
+            ']'
+        };
+        let Some(len) = rest[open..].find(close) else {
+            break;
+        };
+        let inside = rest[open + 1..open + len].to_lowercase();
+        out.push_str(&rest[..open]);
+        if !TITLE_NOISE.iter().any(|noise| inside.contains(noise)) {
+            out.push_str(&rest[open..=open + len]);
+        }
+        rest = &rest[open + len + 1..];
+    }
+    out.push_str(rest);
+    // "Title - Remastered 2011", "Title - Live" stay; only remasters go.
+    if let Some((head, tail)) = out.rsplit_once(" - ")
+        && tail.to_lowercase().contains("remaster")
+    {
+        out = head.to_string();
+    }
+    // "Artist - Title", as music videos are named.
+    let artist = main_artist(artist).to_lowercase();
+    if let Some((head, tail)) = out.split_once(" - ")
+        && !artist.is_empty()
+        && head.trim().to_lowercase() == artist
+    {
+        out = tail.to_string();
+    }
+    let out = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if out.is_empty() {
+        title.trim().to_string()
+    } else {
+        out
+    }
+}
+
+/// The first artist of a credit ("A, B & C", "A feat. B", "A x B") and
+/// without YouTube's " - Topic" or "VEVO".
+#[must_use]
+pub fn main_artist(artist: &str) -> String {
+    let mut name = artist.trim();
+    for suffix in [" - Topic", "VEVO"] {
+        if let Some(stripped) = name.strip_suffix(suffix) {
+            name = stripped.trim_end();
+        }
+    }
+    let lower = name.to_lowercase();
+    let cut = [",", " & ", " x ", " feat", " ft.", " ft ", " y ", " and "]
+        .iter()
+        .filter_map(|sep| lower.find(sep))
+        .min()
+        // Lower-casing can change byte lengths; cut only on a boundary.
+        .filter(|&cut| name.is_char_boundary(cut))
+        .unwrap_or(name.len());
+    name[..cut].trim().to_string()
+}
+
 /// A version of a song's lyrics a service offers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
@@ -235,8 +324,40 @@ pub struct Candidate {
 /// first line starts within a moment of each other, and take the biggest
 /// group (most people agree). Ties go to the album's version, then to the
 /// closest length.
+///
+/// When no version is within 3 s of the song (a music video with a longer
+/// intro, a radio edit), the closest ones up to 20 s away are used: their
+/// timing may be off by a little, which scrolling over the island corrects,
+/// and that beats showing no lyrics.
 #[must_use]
 pub fn pick(candidates: &[Candidate], length: Option<f64>, album: &str) -> Option<usize> {
+    let off = |c: &Candidate| match (length, c.duration) {
+        (Some(length), Some(duration)) => (length - duration).abs(),
+        _ => 0.0,
+    };
+    let close: Vec<usize> = (0..candidates.len())
+        .filter(|&i| off(&candidates[i]) <= 3.0)
+        .collect();
+    if !close.is_empty() {
+        return pick_among(candidates, close, length, album);
+    }
+    let nearest = candidates
+        .iter()
+        .map(off)
+        .filter(|off| *off <= 20.0)
+        .min_by(f64::total_cmp)?;
+    let nearby = (0..candidates.len())
+        .filter(|&i| off(&candidates[i]) <= nearest + 1.5)
+        .collect();
+    pick_among(candidates, nearby, length, album)
+}
+
+fn pick_among(
+    candidates: &[Candidate],
+    mut fitting: Vec<usize>,
+    length: Option<f64>,
+    album: &str,
+) -> Option<usize> {
     let album = album.trim().to_lowercase();
     let same_album = |c: &Candidate| {
         let theirs = c.album.trim().to_lowercase();
@@ -246,9 +367,6 @@ pub fn pick(candidates: &[Candidate], length: Option<f64>, album: &str) -> Optio
         (Some(length), Some(duration)) => (length - duration).abs(),
         _ => 0.0,
     };
-    let mut fitting: Vec<usize> = (0..candidates.len())
-        .filter(|&i| off(&candidates[i]) <= 3.0)
-        .collect();
     fitting.sort_by_key(|&i| candidates[i].first);
     // Clusters of versions whose first lines start within 0.6 s.
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -377,6 +495,55 @@ mod tests {
         assert_eq!(lines[0].words.len(), 1);
         let lines = parse("[00:10.00]two words\n[00:40.00]next");
         assert!(lines[0].words[1].at < ms(11_000));
+    }
+
+    #[test]
+    fn cleans_titles_as_services_name_them() {
+        assert_eq!(
+            clean_title("Night Drive (Official Video)", "Some Band"),
+            "Night Drive"
+        );
+        assert_eq!(clean_title("Night Drive [Lyrics]", ""), "Night Drive");
+        assert_eq!(
+            clean_title("Some Band - Night Drive (Audio)", "Some Band"),
+            "Night Drive"
+        );
+        assert_eq!(
+            clean_title("Night Drive - Remastered 2011", ""),
+            "Night Drive"
+        );
+        assert_eq!(clean_title("Night Drive (feat. Guest)", ""), "Night Drive");
+        // What belongs to the title stays.
+        assert_eq!(
+            clean_title("Night Drive (Part II)", ""),
+            "Night Drive (Part II)"
+        );
+        assert_eq!(clean_title("Night Drive - Live", ""), "Night Drive - Live");
+        assert_eq!(clean_title("(Official Video)", ""), "(Official Video)");
+    }
+
+    #[test]
+    fn takes_the_main_artist() {
+        assert_eq!(main_artist("Some Band, Guest & Other"), "Some Band");
+        assert_eq!(main_artist("Some Band feat. Guest"), "Some Band");
+        assert_eq!(main_artist("Some Band x Guest"), "Some Band");
+        assert_eq!(main_artist("Some Band - Topic"), "Some Band");
+        assert_eq!(main_artist("SomeBandVEVO"), "SomeBand");
+        assert_eq!(main_artist("Ñandú"), "Ñandú");
+    }
+
+    #[test]
+    fn falls_back_to_the_closest_lengths() {
+        let candidates = [
+            candidate(233.0, "A", 1000),
+            candidate(245.0, "A", 9000),
+            candidate(245.5, "A", 9100),
+            candidate(253.0, "A", 12_000),
+        ];
+        // Nothing within 3 s of 258: the 253 s version is the closest.
+        assert_eq!(pick(&candidates, Some(258.0), ""), Some(3));
+        // Nothing within 20 s: no lyrics.
+        assert_eq!(pick(&candidates, Some(300.0), ""), None);
     }
 
     fn candidate(duration: f64, album: &str, first: u64) -> Candidate {

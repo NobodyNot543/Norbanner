@@ -124,46 +124,76 @@ fn run(
     }
 }
 
-/// Searches by title and artist, then lets [`lyrics::pick`] choose among
-/// the versions with synced lyrics (the one most volunteers agree on).
+/// Looks the song up as lyric services name it (players add "(Official
+/// Video)", "Artist - " and guest lists that the services do not have):
+/// first by title and main artist, then with a general search, then with
+/// the player's own words. [`lyrics::pick`] chooses among the versions with
+/// synced lyrics each time; the first search that yields one wins.
 fn lookup(song: &Song, length: Option<Duration>) -> Option<Vec<Line>> {
-    if song.title.trim().is_empty() {
+    let title = lyrics::clean_title(&song.title, &song.artist);
+    let artist = lyrics::main_artist(&song.artist);
+    if title.is_empty() {
         return None;
     }
-    let mut path = format!("/api/search?track_name={}", encode(song.title.trim()));
-    if !song.artist.trim().is_empty() {
-        path.push_str(&format!("&artist_name={}", encode(song.artist.trim())));
+    let mut searches = Vec::new();
+    let mut by_fields = format!("/api/search?track_name={}", encode(&title));
+    if !artist.is_empty() {
+        by_fields.push_str(&format!("&artist_name={}", encode(&artist)));
     }
-    let body = get(&path)?;
-    let results: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
-    let mut versions = Vec::new();
-    let mut candidates = Vec::new();
-    for result in &results {
-        let Some(lines) = result
-            .get("syncedLyrics")
-            .and_then(serde_json::Value::as_str)
-            .map(lyrics::parse)
-            .filter(|lines| !lines.is_empty())
-        else {
-            continue;
-        };
-        candidates.push(lyrics::Candidate {
-            duration: result.get("duration").and_then(serde_json::Value::as_f64),
-            album: result
-                .get("albumName")
+    searches.push(by_fields);
+    searches.push(format!(
+        "/api/search?q={}",
+        encode(format!("{title} {artist}").trim())
+    ));
+    if title != song.title.trim() || artist != song.artist.trim() {
+        let mut raw = format!("/api/search?track_name={}", encode(song.title.trim()));
+        if !song.artist.trim().is_empty() {
+            raw.push_str(&format!("&artist_name={}", encode(song.artist.trim())));
+        }
+        searches.push(raw);
+    }
+    let artist_lower = artist.to_lowercase();
+    searches.iter().find_map(|path| {
+        let body = get(path)?;
+        let results: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
+        let mut versions = Vec::new();
+        let mut candidates = Vec::new();
+        for result in &results {
+            // A general search also finds other artists' songs of that name.
+            let theirs = result
+                .get("artistName")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
-                .to_string(),
-            first: lines[0].at,
-        });
-        versions.push(lines);
-    }
-    let chosen = lyrics::pick(
-        &candidates,
-        length.map(|length| length.as_secs_f64()),
-        &song.album,
-    )?;
-    Some(versions.swap_remove(chosen))
+                .to_lowercase();
+            if !artist_lower.is_empty() && !theirs.contains(&artist_lower) {
+                continue;
+            }
+            let Some(lines) = result
+                .get("syncedLyrics")
+                .and_then(serde_json::Value::as_str)
+                .map(lyrics::parse)
+                .filter(|lines| !lines.is_empty())
+            else {
+                continue;
+            };
+            candidates.push(lyrics::Candidate {
+                duration: result.get("duration").and_then(serde_json::Value::as_f64),
+                album: result
+                    .get("albumName")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                first: lines[0].at,
+            });
+            versions.push(lines);
+        }
+        let chosen = lyrics::pick(
+            &candidates,
+            length.map(|length| length.as_secs_f64()),
+            &song.album,
+        )?;
+        Some(versions.swap_remove(chosen))
+    })
 }
 
 /// Percent-encodes a query value.
