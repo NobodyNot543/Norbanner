@@ -98,16 +98,19 @@ unsafe extern "system" fn keyboard(code: i32, wparam: WPARAM, lparam: LPARAM) ->
         let message = wparam.0 as u32;
         let down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
         let up = message == WM_KEYUP || message == WM_SYSKEYUP;
-        if !injected {
-            if VOLUME_KEYS.load(Ordering::Relaxed)
-                && let Some(step) = volume_key(vk)
-            {
-                // Held down, the key repeats: one step per repeat.
-                if down {
-                    events::push(Event::VolumeKey(step));
-                }
-                return LRESULT(1);
+        // Injected ones too: many keyboards' media keys arrive that way
+        // (translated by a driver or Windows' HID service, scan code 0).
+        // The shell never injects volume keys itself.
+        if VOLUME_KEYS.load(Ordering::Relaxed)
+            && let Some(step) = volume_key(vk)
+        {
+            // Held down, the key repeats: one step per repeat.
+            if down {
+                events::push(Event::VolumeKey(step));
             }
+            return LRESULT(1);
+        }
+        if !injected {
             let is_win = vk == VK_LWIN || vk == VK_RWIN;
             if is_win && down {
                 if !WIN_DOWN.swap(true, Ordering::Relaxed) {
