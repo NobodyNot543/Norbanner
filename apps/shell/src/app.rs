@@ -91,6 +91,8 @@ pub const WM_CONFIG: u32 = WM_APP + 18;
 pub const WM_WALLPAPER: u32 = WM_APP + 19;
 /// A lyrics lookup ended.
 pub const WM_LYRICS: u32 = WM_APP + 20;
+/// Windows was about to show its volume or brightness indicator (hidden).
+const WM_SYSTEM_OSD: u32 = WM_APP + 21;
 
 const TIMER_POLL: usize = 1;
 const TIMER_SECOND: usize = 2;
@@ -212,6 +214,11 @@ unsafe extern "system" fn win_event(
         return;
     }
     match event {
+        // Windows' volume or brightness indicator: hidden at once, and
+        // Norbanner's sliders show the level instead.
+        EVENT_OBJECT_SHOW if crate::flyouts::hide_if_indicator(hwnd) => {
+            events::push(Event::Service(WM_SYSTEM_OSD));
+        }
         EVENT_SYSTEM_FOREGROUND => events::push(Event::Foreground),
         EVENT_OBJECT_NAMECHANGE => {
             // SAFETY: Read-only query.
@@ -585,6 +592,7 @@ impl App {
         app.install_win_events();
         app.hooks
             .configure(&app.config.launcher.hotkey, &app.config.session.hotkey);
+        crate::flyouts::set_enabled(app.config.osd.enabled);
         if app.config.general.replace_taskbar {
             taskbar::take_over();
         }
@@ -679,20 +687,27 @@ impl App {
                         notify();
                     }
                 }
-                while let Ok((monitor, request)) = brx.recv() {
-                    // Only the latest request per burst matters.
-                    let mut latest = (monitor, request);
+                while let Ok(first) = brx.recv() {
+                    // Only the latest request of each kind per screen in a
+                    // burst matters: a drag's last value, one read per
+                    // screen (all of them are asked at once).
+                    let mut burst = vec![first];
                     while let Ok(next) = brx.try_recv() {
-                        latest = next;
+                        burst.retain(|&(monitor, request): &(isize, Option<f32>)| {
+                            monitor != next.0 || request.is_some() != next.1.is_some()
+                        });
+                        burst.push(next);
                     }
-                    match latest {
-                        (monitor, Some(value)) => {
-                            norbanner_shell::brightness::set(monitor, value);
-                        }
-                        (monitor, None) => {
-                            if let Some(value) = norbanner_shell::brightness::get(monitor) {
-                                let _ = tx.send(Work::Brightness(monitor, value));
-                                notify();
+                    for (monitor, request) in burst {
+                        match request {
+                            Some(value) => {
+                                norbanner_shell::brightness::set(monitor, value);
+                            }
+                            None => {
+                                if let Some(value) = norbanner_shell::brightness::get(monitor) {
+                                    let _ = tx.send(Work::Brightness(monitor, value));
+                                    notify();
+                                }
                             }
                         }
                     }
@@ -1134,6 +1149,7 @@ impl App {
         });
         self.hooks
             .configure(&self.config.launcher.hotkey, &self.config.session.hotkey);
+        crate::flyouts::set_enabled(self.config.osd.enabled);
         if self.config.general.replace_taskbar {
             taskbar::take_over();
         } else {
@@ -2092,6 +2108,16 @@ impl App {
                 }
             }
             WM_LOCK_KEYS => self.refresh_lock_keys(),
+            WM_SYSTEM_OSD => {
+                // The brightness keys change it behind the shell's back:
+                // read it again (the volume has its own notification).
+                if let Some(tx) = &self.brightness_tx {
+                    for screen in &self.screens {
+                        let _ = tx.send((screen.monitor, None));
+                    }
+                }
+                self.show_osd();
+            }
             WM_CONFIG => {
                 self.reload_config();
                 self.sync_lyrics();

@@ -8,9 +8,10 @@ cbuffer Scene : register(b0)
     float4 params;       // hole radius, smoothing, shadow size, shadow alpha
     float4 surfaceColor; // premultiplied
     float4 shadowColor;  // straight rgb
-    float4 counts;       // blob count
+    float4 counts;       // x: blob count, y: outline width (px)
     float4 glass;        // x: wallpaper behind (0/1), y: tint over it
     float4 cover;        // wallpaper uv = pixel * xy + zw
+    float4 outlineColor; // straight rgb, a = strength (0: none)
     float4 blobs[24];    // x, y, w, h
     float4 blobRadii[24];// radius in x
 };
@@ -67,6 +68,10 @@ float4 ps(VsOut i) : SV_Target
         float3 tint = surfaceColor.a > 0.0 ? surfaceColor.rgb / surfaceColor.a : surfaceColor.rgb;
         surface = float4(lerp(behind, tint, glass.y), 1.0);
     }
+    // A thin line along the surface's edge, inside it, so the frame and the
+    // drawers stand out from dark windows and wallpapers.
+    float ring = saturate(d + counts.y + 0.5) * outlineColor.a;
+    surface = float4(outlineColor.rgb * ring, ring) + surface * (1.0 - ring);
     float fall = saturate(d / max(params.z, 1.0));
     float shadow = params.w * (1.0 - fall) * (1.0 - fall) * step(0.0, d);
     return surface * inside + float4(shadowColor.rgb * shadow, shadow) * (1.0 - inside);

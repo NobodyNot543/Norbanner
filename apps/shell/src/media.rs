@@ -16,6 +16,7 @@ use windows::{
     Media::Control::{
         GlobalSystemMediaTransportControlsSession as Session,
         GlobalSystemMediaTransportControlsSessionManager as Manager,
+        GlobalSystemMediaTransportControlsSessionPlaybackInfo as PlaybackInfo,
         GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
     },
     Storage::Streams::{DataReader, IRandomAccessStreamReference},
@@ -57,6 +58,17 @@ impl Timeline {
             recorded: Instant::now(),
             rate,
         })
+    }
+
+    /// The same song carried on from `now` at a new `rate`: where this
+    /// timeline puts it now, moving from here on as `rate` says.
+    fn continued(self, rate: f64, now: Instant) -> Self {
+        Self {
+            position: self.position_at(now),
+            recorded: now,
+            rate: if rate.is_finite() { rate } else { 1.0 },
+            ..self
+        }
     }
 
     pub fn position_at(self, now: Instant) -> Duration {
@@ -253,6 +265,10 @@ struct Current {
     artist: String,
     album: String,
     artwork: Option<Arc<IconImage>>,
+    /// The timeline as the player last published it (start, end, position,
+    /// when), and where that left the song.
+    published: Option<[i64; 4]>,
+    timeline: Option<Timeline>,
 }
 
 impl Current {
@@ -280,10 +296,15 @@ impl Current {
             artist: String::new(),
             album: String::new(),
             artwork: None,
+            published: None,
+            timeline: None,
         }
     }
 
     fn update_track(&mut self) {
+        // A new song starts from its own timeline, never the last one's.
+        self.published = None;
+        self.timeline = None;
         // A failed read belongs to this metadata change, not to the previous
         // song. Never pair yesterday's title/artist with the current session.
         self.title.clear();
@@ -327,7 +348,51 @@ impl Current {
         }
     }
 
-    fn snapshot(&self, generation: u64, progress: bool) -> Option<Track> {
+    /// Where the song is. Some players publish their position only when it
+    /// jumps (Spotify: on seek, play and pause), so between those the last
+    /// published one is still all there is. Read again with nothing new
+    /// published, it must not be taken afresh: a position published before
+    /// a pause, read on resuming, would add the whole pause as if played;
+    /// one published while playing, read on pausing, would jump back to it.
+    /// Then the song carries on from where the last read left it.
+    fn read_timeline(&mut self, info: &PlaybackInfo, playing: bool) -> Option<Timeline> {
+        let timeline = self.session.GetTimelineProperties().ok()?;
+        let rate = if playing {
+            info.PlaybackRate()
+                .ok()
+                .and_then(|rate| rate.Value().ok())
+                .unwrap_or(1.0)
+        } else {
+            0.0
+        };
+        let updated = timeline
+            .LastUpdatedTime()
+            .map(|time| time.UniversalTime)
+            .unwrap_or_default();
+        let published = [
+            timeline.StartTime().ok()?.Duration,
+            timeline.EndTime().ok()?.Duration,
+            timeline.Position().ok()?.Duration,
+            updated,
+        ];
+        let current = match self.timeline {
+            Some(last) if self.published == Some(published) => {
+                Some(last.continued(rate, Instant::now()))
+            }
+            _ => Timeline::new(
+                published[0],
+                published[1],
+                published[2],
+                timeline_age(updated, SystemTime::now()),
+                rate,
+            ),
+        };
+        self.published = Some(published);
+        self.timeline = current;
+        current
+    }
+
+    fn snapshot(&mut self, generation: u64, progress: bool) -> Option<Track> {
         let info = self.session.GetPlaybackInfo().ok()?;
         let status = info.PlaybackStatus().ok()?;
         if !matches!(status, Status::Playing | Status::Paused | Status::Changing) {
@@ -335,29 +400,14 @@ impl Current {
         }
         let playing = matches!(status, Status::Playing | Status::Changing);
         let controls = info.Controls().ok()?;
-        let timeline = progress
-            .then(|| {
-                let timeline = self.session.GetTimelineProperties().ok()?;
-                let rate = if playing {
-                    info.PlaybackRate()
-                        .ok()
-                        .and_then(|rate| rate.Value().ok())
-                        .unwrap_or(1.0)
-                } else {
-                    0.0
-                };
-                Timeline::new(
-                    timeline.StartTime().ok()?.Duration,
-                    timeline.EndTime().ok()?.Duration,
-                    timeline.Position().ok()?.Duration,
-                    timeline
-                        .LastUpdatedTime()
-                        .map(|time| timeline_age(time.UniversalTime, SystemTime::now()))
-                        .unwrap_or_default(),
-                    rate,
-                )
-            })
-            .flatten();
+        let timeline = if progress {
+            self.read_timeline(&info, playing)
+        } else {
+            // Not followed meanwhile: the next read starts afresh.
+            self.published = None;
+            self.timeline = None;
+            None
+        };
         Some(Track {
             generation,
             title: self.title.clone(),
@@ -473,7 +523,7 @@ fn run(
                 current.update_track();
             }
             let latest = current
-                .as_ref()
+                .as_mut()
                 .and_then(|current| current.snapshot(generation, progress));
             if let Ok(mut snapshot) = state.lock()
                 && *snapshot != latest
@@ -563,6 +613,29 @@ mod native_probe {
         let normalized = Timeline::new(0, 900_000_000, -1, Duration::ZERO, f64::NAN)
             .context("normalized timeline")?;
         assert_eq!(normalized.position_at(normalized.recorded), Duration::ZERO);
+        Ok(())
+    }
+
+    #[test]
+    fn a_continued_timeline_keeps_the_song_where_it_was() -> anyhow::Result<()> {
+        // Published at 15 s while playing; the player then pauses 4 s later
+        // without publishing anything new.
+        let mut playing = Timeline::new(0, 900_000_000, 150_000_000, Duration::ZERO, 1.0)
+            .context("finite playing timeline")?;
+        let anchor = Instant::now();
+        playing.recorded = anchor;
+        let paused = playing.continued(0.0, anchor + Duration::from_secs(4));
+        assert_eq!(
+            paused.position_at(anchor + Duration::from_secs(60)),
+            Duration::from_secs(19)
+        );
+        // Resumed a minute later: on from 19 s, not 15 s plus the pause.
+        let resumed = paused.continued(1.0, anchor + Duration::from_secs(64));
+        assert_eq!(
+            resumed.position_at(anchor + Duration::from_secs(66)),
+            Duration::from_secs(21)
+        );
+        assert_eq!(resumed.duration, playing.duration);
         Ok(())
     }
 

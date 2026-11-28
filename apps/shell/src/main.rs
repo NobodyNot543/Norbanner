@@ -23,6 +23,7 @@ mod backdrop;
 mod bluetooth;
 mod events;
 mod exclusive;
+mod flyouts;
 mod guard;
 mod hotkeys;
 mod icons;

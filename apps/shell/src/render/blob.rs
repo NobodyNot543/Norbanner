@@ -39,6 +39,9 @@ pub struct BlobScene {
     /// with its generation, and how much of `color` lies over it.
     pub glass: Option<(u32, Arc<IconImage>)>,
     pub tint: f32,
+    /// A line along the surface's edge (alpha 0: none), and its width.
+    pub outline: Color,
+    pub outline_width: f32,
 }
 
 #[repr(C)]
@@ -51,6 +54,7 @@ struct Constants {
     counts: [f32; 4],
     glass: [f32; 4],
     cover: [f32; 4],
+    outline: [f32; 4],
     blobs: [[f32; 4]; MAX_BLOBS],
     radii: [[f32; 4]; MAX_BLOBS],
 }
@@ -203,9 +207,15 @@ impl Pipeline {
             // Premultiplied for the swap chain.
             surface: [c.r * c.a, c.g * c.a, c.b * c.a, c.a],
             shadow: [scene.shadow.r, scene.shadow.g, scene.shadow.b, 1.0],
-            counts: [0.0; 4],
+            counts: [0.0, scene.outline_width, 0.0, 0.0],
             glass: [0.0; 4],
             cover: [0.0; 4],
+            outline: [
+                scene.outline.r,
+                scene.outline.g,
+                scene.outline.b,
+                scene.outline.a,
+            ],
             blobs: [[0.0; 4]; MAX_BLOBS],
             radii: [[0.0; 4]; MAX_BLOBS],
         };

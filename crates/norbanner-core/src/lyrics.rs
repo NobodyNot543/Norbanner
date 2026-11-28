@@ -328,7 +328,8 @@ pub struct Candidate {
 }
 
 /// Which version to use. Volunteers time the same recording slightly
-/// differently, so: keep those as long as the song, group the ones whose
+/// differently, so: keep those as long as the song (within 1.5 s if any
+/// are, else within 3 s), group the ones whose
 /// first line starts within a moment of each other, and take the biggest
 /// group (most people agree). Ties go to the album's version, then to the
 /// closest length.
@@ -343,11 +344,16 @@ pub fn pick(candidates: &[Candidate], length: Option<f64>, album: &str) -> Optio
         (Some(length), Some(duration)) => (length - duration).abs(),
         _ => 0.0,
     };
-    let close: Vec<usize> = (0..candidates.len())
-        .filter(|&i| off(&candidates[i]) <= 3.0)
-        .collect();
-    if !close.is_empty() {
-        return pick_among(candidates, close, length, album);
+    // A version as long as the song (the service rounds to the second) is
+    // most likely timed on that very recording; one a few seconds off may
+    // be another master with a different intro, which shifts every line.
+    for limit in [1.5, 3.0] {
+        let close: Vec<usize> = (0..candidates.len())
+            .filter(|&i| off(&candidates[i]) <= limit)
+            .collect();
+        if !close.is_empty() {
+            return pick_among(candidates, close, length, album);
+        }
     }
     let nearest = candidates
         .iter()
@@ -579,6 +585,20 @@ mod tests {
         ];
         let chosen = pick(&candidates, Some(269.2), "Album").map(|i| candidates[i].first);
         assert_eq!(chosen, Some(ms(19_390)));
+    }
+
+    #[test]
+    fn a_version_as_long_as_the_song_beats_a_crowd_a_little_off() {
+        let candidates = [
+            candidate(212.0, "Other", 9000),
+            candidate(212.0, "Other", 9100),
+            candidate(212.0, "Other", 9200),
+            candidate(210.0, "Album", 6500),
+        ];
+        // Spotify says 210.3 s: the 210 s version, though the others agree.
+        assert_eq!(pick(&candidates, Some(210.3), ""), Some(3));
+        // Without a version that close, most agreeing still wins.
+        assert_eq!(pick(&candidates, Some(211.0), ""), Some(0));
     }
 
     #[test]

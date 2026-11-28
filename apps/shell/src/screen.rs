@@ -690,6 +690,14 @@ impl Screen {
             // Frosted glass: the blurred wallpaper under the theme's surface.
             glass: state.backdrop.clone(),
             tint: 0.6,
+            // A dark surface melts into dark windows and wallpapers: its edge
+            // gets a thin line (light themes stand out on their own).
+            outline: if is_dark(palette) {
+                palette.outline_variant.with_alpha(1.0 - fs)
+            } else {
+                palette.outline_variant.with_alpha(0.0)
+            },
+            outline_width: (1.5 * s).max(1.0),
         };
         let placements = self.placements;
         let dash_tokens = Tokens::for_dashboard(config, self.scale);
@@ -776,6 +784,12 @@ impl Screen {
             .rev()
             .find(|h| h.rect.contains(x, y) && want(&h.kind))
     }
+}
+
+/// Whether the theme is dark (its surface is), however the mode was chosen.
+fn is_dark(palette: &Palette) -> bool {
+    let s = palette.surface;
+    0.2126 * s.r + 0.7152 * s.g + 0.0722 * s.b < 0.5
 }
 
 /// Draws a drawer's content clipped to the part that has come out.
